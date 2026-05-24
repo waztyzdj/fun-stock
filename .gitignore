@@ -1,0 +1,38 @@
+# OS and editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+dist/
+build/
+
+# Node
+node_modules/
+frontend/.pnpm-store/
+frontend/dist/
+frontend/.vite/
+frontend/.eslintcache
+
+# Logs
+*.log
+
+# Data
+data/
+*.parquet
