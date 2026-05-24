@@ -6,10 +6,10 @@ $ErrorActionPreference = "Stop"
 
 $docs = @(
     @{ Group = "basic"; DocId = 25;  FallbackApi = "stock_basic" },
-    @{ Group = "basic"; DocId = 329; FallbackApi = $null },
+    @{ Group = "basic"; DocId = 329; FallbackApi = "stk_premarket" },
     @{ Group = "basic"; DocId = 26;  FallbackApi = "trade_cal" },
-    @{ Group = "basic"; DocId = 397; FallbackApi = $null },
-    @{ Group = "basic"; DocId = 423; FallbackApi = $null },
+    @{ Group = "basic"; DocId = 397; FallbackApi = "stock_st" },
+    @{ Group = "basic"; DocId = 423; FallbackApi = "stock_st_warning" },
     @{ Group = "basic"; DocId = 398; FallbackApi = $null },
     @{ Group = "basic"; DocId = 100; FallbackApi = "namechange" },
     @{ Group = "basic"; DocId = 112; FallbackApi = "stock_company" },
@@ -20,18 +20,18 @@ $docs = @(
     @{ Group = "basic"; DocId = 262; FallbackApi = $null },
 
     @{ Group = "quote"; DocId = 27;  FallbackApi = "daily" },
-    @{ Group = "quote"; DocId = 372; FallbackApi = $null },
-    @{ Group = "quote"; DocId = 370; FallbackApi = $null },
-    @{ Group = "quote"; DocId = 374; FallbackApi = $null },
-    @{ Group = "quote"; DocId = 457; FallbackApi = $null },
+    @{ Group = "quote"; DocId = 372; FallbackApi = "rt_k" },
+    @{ Group = "quote"; DocId = 370; FallbackApi = "stk_mins" },
+    @{ Group = "quote"; DocId = 374; FallbackApi = "rt_min" },
+    @{ Group = "quote"; DocId = 457; FallbackApi = "rt_min_daily" },
     @{ Group = "quote"; DocId = 144; FallbackApi = "weekly" },
     @{ Group = "quote"; DocId = 145; FallbackApi = "monthly" },
-    @{ Group = "quote"; DocId = 146; FallbackApi = "pro_bar" },
+    # doc_id=146 pro_bar is a client-side adjustment wrapper, not a separate storage table.
     @{ Group = "quote"; DocId = 336; FallbackApi = $null },
     @{ Group = "quote"; DocId = 365; FallbackApi = $null },
     @{ Group = "quote"; DocId = 28;  FallbackApi = "adj_factor" },
     @{ Group = "quote"; DocId = 32;  FallbackApi = "daily_basic" },
-    @{ Group = "quote"; DocId = 109; FallbackApi = "pro_bar" },
+    # doc_id=109 pro_bar generic quote interface is not a separate storage table.
     @{ Group = "quote"; DocId = 183; FallbackApi = "stk_limit" },
     @{ Group = "quote"; DocId = 214; FallbackApi = "suspend_d" },
     @{ Group = "quote"; DocId = 48;  FallbackApi = "hsgt_top10" },
@@ -90,7 +90,8 @@ function InferPgType([string]$FieldName, [string]$TushareType) {
         return "date"
     }
     if ($field -match 'time|datetime') { return "text" }
-    if ($type -match 'int') { return "integer" }
+    if ([string]::IsNullOrWhiteSpace($type) -or $type -eq "none") { return "text" }
+    if ($type -match 'int') { return "bigint" }
     if ($type -match 'float|double|number') { return "numeric" }
     if ($type -match 'str|char') { return "text" }
     return "numeric"
@@ -148,7 +149,34 @@ function GetPrimaryKey([string]$ApiName, [object[]]$Columns) {
     return @()
 }
 
+function GetHypertableTimeColumn([string]$ApiName, [object[]]$Columns) {
+    $fields = @($Columns | ForEach-Object { $_.Name })
+    $tradeDateApis = @(
+        "stk_premarket",
+        "daily",
+        "weekly",
+        "monthly",
+        "stk_weekly_monthly",
+        "stk_week_month_adj",
+        "adj_factor",
+        "daily_basic",
+        "stk_limit",
+        "hsgt_top10",
+        "ggt_top10",
+        "ggt_daily",
+        "bak_daily"
+    )
+
+    if (($tradeDateApis -contains $ApiName) -and ($fields -contains "trade_date")) {
+        return "trade_date"
+    }
+    return $null
+}
+
 function ExtractInterfaceName([string]$Html, [string]$FallbackApi) {
+    $title = GetPageTitle $Html
+    if ($FallbackApi -in @("stock_st", "stock_st_warning")) { return $FallbackApi }
+
     $patterns = @(
         '接口：\s*([a-zA-Z0-9_]+)',
         '接口名称：\s*([a-zA-Z0-9_]+)',
@@ -166,25 +194,45 @@ function ExtractInterfaceName([string]$Html, [string]$FallbackApi) {
 function ExtractOutputColumns([string]$Html) {
     $outputTitle = [string][char]0x8F93 + [string][char]0x51FA + [string][char]0x53C2 + [string][char]0x6570
     $marker = [regex]::Match($Html, "<(?:strong|h[1-6])[^>]*>\s*$outputTitle\s*</(?:strong|h[1-6])>", 'IgnoreCase')
-    if (-not $marker.Success) { return @() }
-
-    $after = $Html.Substring($marker.Index)
-    $tableMatch = [regex]::Match($after, '<table>.*?</table>', 'Singleline,IgnoreCase')
-    if (-not $tableMatch.Success) { return @() }
+    if (-not $marker.Success) {
+        $marker = [regex]::Match($Html, "\*\*\s*$outputTitle\s*\*\*", 'IgnoreCase')
+    }
+    if ($marker.Success) {
+        $after = $Html.Substring($marker.Index)
+        $tableMatch = [regex]::Match($after, '<table>.*?</table>', 'Singleline,IgnoreCase')
+    } else {
+        $tableMatch = $null
+        $tables = [regex]::Matches($Html, '<table>.*?</table>', 'Singleline,IgnoreCase')
+        foreach ($table in $tables) {
+            $headers = @([regex]::Matches($table.Value, '<th>(.*?)</th>', 'Singleline,IgnoreCase') | ForEach-Object { HtmlDecode $_.Groups[1].Value })
+            $sampleFields = @([regex]::Matches($table.Value, '<td>(.*?)</td>', 'Singleline,IgnoreCase') | Select-Object -First 8 | ForEach-Object { HtmlDecode $_.Groups[1].Value })
+            if (($headers.Count -eq 3) -and (($sampleFields -contains "ts_code") -or ($sampleFields -contains "trade_date") -or ($sampleFields -contains "ann_date"))) {
+                $tableMatch = $table
+                break
+            }
+        }
+    }
+    if ($null -eq $tableMatch -or -not $tableMatch.Success) { return @() }
 
     $rows = [regex]::Matches($tableMatch.Value, '<tr>(.*?)</tr>', 'Singleline,IgnoreCase')
     $columns = New-Object System.Collections.Generic.List[object]
     for ($i = 1; $i -lt $rows.Count; $i++) {
         $cells = [regex]::Matches($rows[$i].Groups[1].Value, '<td>(.*?)</td>', 'Singleline,IgnoreCase')
-        if ($cells.Count -lt 4) { continue }
+        if ($cells.Count -lt 3) { continue }
         $name = HtmlDecode $cells[0].Groups[1].Value
         if ([string]::IsNullOrWhiteSpace($name) -or $name -match '[^\w]') { continue }
         $typeText = HtmlDecode $cells[1].Groups[1].Value
+        $defaultDisplay = ""
+        $descriptionCell = 2
+        if ($cells.Count -ge 4) {
+            $defaultDisplay = HtmlDecode $cells[2].Groups[1].Value
+            $descriptionCell = 3
+        }
         $columns.Add([pscustomobject]@{
             Name = $name
             Type = $typeText
-            DefaultDisplay = HtmlDecode $cells[2].Groups[1].Value
-            Description = HtmlDecode $cells[3].Groups[1].Value
+            DefaultDisplay = $defaultDisplay
+            Description = HtmlDecode $cells[$descriptionCell].Groups[1].Value
             PgType = InferPgType $name $typeText
         })
     }
@@ -198,6 +246,7 @@ function WriteTable([System.Text.StringBuilder]$Sql, [hashtable]$Doc, [string]$T
     $timeField = @("trade_date", "cal_date", "ann_date", "end_date", "suspend_date") | Where-Object {
         $fieldNames -contains $_
     } | Select-Object -First 1
+    $hypertableTimeField = GetHypertableTimeColumn $ApiName $Columns
 
     [void]$Sql.AppendLine("")
     [void]$Sql.AppendLine("-- $($groupNames[$Doc.Group]) / $Title / https://tushare.pro/document/2?doc_id=$($Doc.DocId)")
@@ -227,6 +276,9 @@ function WriteTable([System.Text.StringBuilder]$Sql, [hashtable]$Doc, [string]$T
     }
     if ($fieldNames -contains "ts_code") {
         [void]$Sql.AppendLine("CREATE INDEX IF NOT EXISTS ix_tushare_$(ToSnakeCase $ApiName)_ts_code ON $tableName (ts_code);")
+    }
+    if ($hypertableTimeField) {
+        [void]$Sql.AppendLine("SELECT create_hypertable('$tableName', '$hypertableTimeField', if_not_exists => TRUE, migrate_data => TRUE);")
     }
 }
 

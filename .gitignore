@@ -5,6 +5,9 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+*.swp
+*.swo
+*~
 
 # Environment
 .env
@@ -20,8 +23,10 @@ __pycache__/
 .coverage
 htmlcov/
 .venv/
+.python-version
 dist/
 build/
+*.egg-info/
 
 # Node
 node_modules/
@@ -29,10 +34,21 @@ frontend/.pnpm-store/
 frontend/dist/
 frontend/.vite/
 frontend/.eslintcache
+coverage/
 
 # Logs
 *.log
+npm-debug.log*
+pnpm-debug.log*
 
 # Data
 data/
 *.parquet
+*.csv
+*.tsv
+
+# Local database and runtime files
+*.sqlite
+*.db
+tmp/
+temp/

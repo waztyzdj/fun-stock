@@ -27,3 +27,10 @@ Open:
 
 See [docs/development.md](docs/development.md).
 
+## Standards
+
+All human and AI-generated changes should follow
+[docs/coding-standards.md](docs/coding-standards.md).
+
+AI coding agents should start from [AGENTS.md](AGENTS.md), then read the scoped
+`AGENTS.md` file in the directory they are editing.
