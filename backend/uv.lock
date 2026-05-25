@@ -413,8 +413,10 @@ dependencies = [
     { name = "polars" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic-settings" },
+    { name = "redis" },
     { name = "sqlalchemy" },
     { name = "tushare" },
+    { name = "typer" },
 ]
 
 [package.dev-dependencies]
@@ -434,8 +436,10 @@ requires-dist = [
     { name = "polars", specifier = ">=1.18.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2.0" },
     { name = "pydantic-settings", specifier = ">=2.7.0" },
+    { name = "redis", specifier = ">=5.2.0" },
     { name = "sqlalchemy", specifier = ">=2.0.0" },
     { name = "tushare", specifier = ">=1.4.0" },
+    { name = "typer", specifier = ">=0.15.0" },
 ]
 
 [package.metadata.requires-dev]

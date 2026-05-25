@@ -1,10 +1,11 @@
 # AGENTS.md
 
-Frontend code lives here. Follow the root `AGENTS.md` and `docs/coding-standards.md`.
+前端代码位于本目录。请同时遵循根目录 `AGENTS.md` 和
+`docs/coding-standards.md`。
 
-## Scope
+## 范围
 
-Current app code is under `src/`. As the UI grows, prefer:
+当前应用代码位于 `src/`。随着界面增长，优先采用以下结构：
 
 ```text
 src/
@@ -18,29 +19,28 @@ src/
   types/
 ```
 
-## Rules
+## 规则
 
-- Use strict TypeScript.
-- Use function components.
-- Keep rendering pure and move side effects to hooks.
-- Do not use `any`; use `unknown` and narrow it.
-- Avoid non-null assertions.
-- Prefer `interface` for props and exported object shapes.
-- Keep API calls in service modules or hooks, not deeply nested UI components.
-- Do not commit `node_modules`, `.pnpm-store`, `dist`, `.vite`, or coverage output.
+- 使用严格 TypeScript。
+- 使用函数组件。
+- 保持渲染逻辑纯净，把副作用放入 hooks。
+- 不使用 `any`；使用 `unknown` 后再收窄类型。
+- 避免非空断言。
+- 组件 props 和导出的对象结构优先使用 `interface`。
+- API 调用放在 service 模块或 hooks 中，不要深埋在 UI 组件里。
+- 不提交 `node_modules`、`.pnpm-store`、`dist`、`.vite` 或覆盖率产物。
 
-## Naming
+## 命名
 
-- Components: `PascalCase`.
-- Hooks: `useCamelCase`.
-- Variables and functions: `camelCase`.
-- Interfaces and type names: `PascalCase`.
-- Component-specific files: `PascalCase.tsx`.
+- 组件：`PascalCase`。
+- Hooks：`useCamelCase`。
+- 变量和函数：`camelCase`。
+- 接口和类型名：`PascalCase`。
+- 组件专属文件：`PascalCase.tsx`。
 
-## Validation
+## 校验
 
 ```powershell
 docker compose run --rm --no-deps frontend pnpm lint
 docker compose run --rm --no-deps frontend pnpm build
 ```
-

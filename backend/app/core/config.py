@@ -13,7 +13,15 @@ class Settings(BaseSettings):
     database_url: str = Field(
         default="postgresql+psycopg://fun_stock:fun_stock@postgres:5432/fun_stock"
     )
-    redis_url: str = "redis://redis:6379/0"
+    redis_url: str = "redis://localhost:6380/0"
+    celery_broker_url: str | None = None
+    celery_result_backend: str | None = None
+    timezone: str = "Asia/Shanghai"
+    tushare_token: str | None = None
+    tushare_scheduler_api_names: str = "stock_basic,trade_cal,daily,daily_basic,adj_factor"
+    tushare_scheduler_max_items: int = 5
+    tushare_scheduler_alert_limit: int = 20
+    tushare_scheduler_lock_ttl_seconds: int = 3600
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -25,4 +33,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

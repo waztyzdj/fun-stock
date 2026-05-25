@@ -259,11 +259,11 @@ CREATE TABLE IF NOT EXISTS tushare.stk_rewards (
     ann_date date NOT NULL,
     end_date date,
     name text NOT NULL,
-    title text NOT NULL,
+    title text,
     reward numeric,
     hold_vol numeric,
     ingested_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (ts_code, ann_date, name, title)
+    PRIMARY KEY (ts_code, ann_date, name)
 );
 COMMENT ON TABLE tushare.stk_rewards IS 'Tushare basic data - 管理层薪酬和持股, api=stk_rewards, doc_id=194';
 COMMENT ON COLUMN tushare.stk_rewards.ts_code IS 'TS股票代码 | Tushare type: str | default_display: Y';
@@ -280,10 +280,11 @@ CREATE INDEX IF NOT EXISTS ix_tushare_stk_rewards_ts_code ON tushare.stk_rewards
 -- basic data / 北交所新旧代码对照表 / https://tushare.pro/document/2?doc_id=375
 CREATE TABLE IF NOT EXISTS tushare.bse_mapping (
     name text,
-    o_code text,
-    n_code text,
+    o_code text NOT NULL,
+    n_code text NOT NULL,
     list_date date,
-    ingested_at timestamptz NOT NULL DEFAULT now()
+    ingested_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (o_code, n_code)
 );
 COMMENT ON TABLE tushare.bse_mapping IS 'Tushare basic data - 北交所新旧代码对照表, api=bse_mapping, doc_id=375';
 COMMENT ON COLUMN tushare.bse_mapping.name IS '股票名称 | Tushare type: str | default_display: Y';
@@ -466,7 +467,7 @@ CREATE TABLE IF NOT EXISTS tushare.stk_mins (
     vol bigint,
     amount numeric,
     ingested_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (ts_code)
+    PRIMARY KEY (ts_code, trade_time)
 );
 COMMENT ON TABLE tushare.stk_mins IS 'Tushare quote data - 股票历史分钟行情, api=stk_mins, doc_id=370';
 COMMENT ON COLUMN tushare.stk_mins.ts_code IS '股票代码 | Tushare type: str | default_display: Y';
@@ -491,7 +492,7 @@ CREATE TABLE IF NOT EXISTS tushare.rt_min (
     vol numeric,
     amount numeric,
     ingested_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (ts_code)
+    PRIMARY KEY (ts_code, time)
 );
 COMMENT ON TABLE tushare.rt_min IS 'Tushare quote data - A股实时分钟, api=rt_min, doc_id=374';
 COMMENT ON COLUMN tushare.rt_min.ts_code IS '股票代码 | Tushare type: str | default_display: Y';
@@ -517,7 +518,7 @@ CREATE TABLE IF NOT EXISTS tushare.rt_min_daily (
     vol numeric,
     amount numeric,
     ingested_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (ts_code)
+    PRIMARY KEY (ts_code, freq, time)
 );
 COMMENT ON TABLE tushare.rt_min_daily IS 'Tushare quote data - Tushare数据, api=rt_min_daily, doc_id=457';
 COMMENT ON COLUMN tushare.rt_min_daily.ts_code IS '股票代码 | Tushare type: str | default_display: Y';

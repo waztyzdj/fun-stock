@@ -23,7 +23,7 @@ services:
     image: redis:8-bookworm
     container_name: fun-stock-redis
     ports:
-      - "6379:6379"
+      - "6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -39,8 +39,51 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://fun_stock:fun_stock@postgres:5432/fun_stock
       REDIS_URL: redis://redis:6379/0
+      TUSHARE_TOKEN: ${TUSHARE_TOKEN:-}
     ports:
       - "8000:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery-worker:
+    build:
+      context: ./backend
+    container_name: fun-stock-celery-worker
+    command: uv run celery -A app.core.celery_app:celery_app worker --loglevel=INFO --concurrency=1
+    env_file:
+      - .env.example
+    environment:
+      DATABASE_URL: postgresql+psycopg://fun_stock:fun_stock@postgres:5432/fun_stock
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      TUSHARE_TOKEN: ${TUSHARE_TOKEN:-}
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery-beat:
+    build:
+      context: ./backend
+    container_name: fun-stock-celery-beat
+    command: uv run celery -A app.core.celery_app:celery_app beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule
+    env_file:
+      - .env.example
+    environment:
+      DATABASE_URL: postgresql+psycopg://fun_stock:fun_stock@postgres:5432/fun_stock
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      TUSHARE_TOKEN: ${TUSHARE_TOKEN:-}
     volumes:
       - ./backend:/app
     depends_on:
