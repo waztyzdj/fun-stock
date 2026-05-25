@@ -30,6 +30,8 @@ stock_basic,trade_cal,daily,daily_basic,adj_factor
 ```
 
 可以通过 `.env` 中的 `TUSHARE_SCHEDULER_API_NAMES`、`TUSHARE_SCHEDULER_MAX_ITEMS` 调整范围和单次规模。
+Tushare 每分钟访问频率受账号积分影响时，可以通过 `TUSHARE_RATE_LIMIT_SLEEP_SECONDS` 和
+`TUSHARE_RATE_LIMIT_MAX_RETRIES` 控制自动休眠重试。
 
 本地开发数据库连接信息：
 

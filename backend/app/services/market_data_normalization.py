@@ -22,10 +22,19 @@ class MarketDataNormalizationService:
             start_date=start_date,
             end_date=end_date,
         )
+        daily_indicators = self.repository.upsert_daily_indicators_from_tushare(
+            start_date=start_date,
+            end_date=end_date,
+        )
+        adj_factors = self.repository.upsert_adj_factors_from_tushare(
+            start_date=start_date,
+            end_date=end_date,
+        )
         self.session.commit()
         return NormalizationResult(
             stocks=stocks,
             trade_calendars=trade_calendars,
             daily_quotes=daily_quotes,
+            daily_indicators=daily_indicators,
+            adj_factors=adj_factors,
         )
-

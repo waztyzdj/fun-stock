@@ -10,6 +10,8 @@ class NormalizationResult:
     stocks: int
     trade_calendars: int
     daily_quotes: int
+    daily_indicators: int = 0
+    adj_factors: int = 0
 
 
 class MarketDataRepository:
@@ -147,6 +149,127 @@ class MarketDataRepository:
                     pct_chg = EXCLUDED.pct_chg,
                     vol = EXCLUDED.vol,
                     amount = EXCLUDED.amount,
+                    updated_at = now()
+                RETURNING 1
+                """
+            ).bindparams(
+                bindparam("start_date", type_=Date),
+                bindparam("end_date", type_=Date),
+            ),
+            {"start_date": start_date, "end_date": end_date},
+        )
+        return len(result.all())
+
+    def upsert_daily_indicators_from_tushare(
+        self,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> int:
+        result = self.session.execute(
+            text(
+                """
+                INSERT INTO app.daily_indicators (
+                    ts_code,
+                    trade_date,
+                    close,
+                    turnover_rate,
+                    turnover_rate_f,
+                    volume_ratio,
+                    pe,
+                    pe_ttm,
+                    pb,
+                    ps,
+                    ps_ttm,
+                    dv_ratio,
+                    dv_ttm,
+                    total_share,
+                    float_share,
+                    free_share,
+                    total_mv,
+                    circ_mv,
+                    updated_at
+                )
+                SELECT
+                    ts_code,
+                    trade_date,
+                    close,
+                    turnover_rate,
+                    turnover_rate_f,
+                    volume_ratio,
+                    pe,
+                    pe_ttm,
+                    pb,
+                    ps,
+                    ps_ttm,
+                    dv_ratio,
+                    dv_ttm,
+                    total_share,
+                    float_share,
+                    free_share,
+                    total_mv,
+                    circ_mv,
+                    now()
+                FROM tushare.daily_basic
+                WHERE ts_code IS NOT NULL
+                  AND trade_date IS NOT NULL
+                  AND (:start_date IS NULL OR trade_date >= :start_date)
+                  AND (:end_date IS NULL OR trade_date <= :end_date)
+                ON CONFLICT (ts_code, trade_date) DO UPDATE SET
+                    close = EXCLUDED.close,
+                    turnover_rate = EXCLUDED.turnover_rate,
+                    turnover_rate_f = EXCLUDED.turnover_rate_f,
+                    volume_ratio = EXCLUDED.volume_ratio,
+                    pe = EXCLUDED.pe,
+                    pe_ttm = EXCLUDED.pe_ttm,
+                    pb = EXCLUDED.pb,
+                    ps = EXCLUDED.ps,
+                    ps_ttm = EXCLUDED.ps_ttm,
+                    dv_ratio = EXCLUDED.dv_ratio,
+                    dv_ttm = EXCLUDED.dv_ttm,
+                    total_share = EXCLUDED.total_share,
+                    float_share = EXCLUDED.float_share,
+                    free_share = EXCLUDED.free_share,
+                    total_mv = EXCLUDED.total_mv,
+                    circ_mv = EXCLUDED.circ_mv,
+                    updated_at = now()
+                RETURNING 1
+                """
+            ).bindparams(
+                bindparam("start_date", type_=Date),
+                bindparam("end_date", type_=Date),
+            ),
+            {"start_date": start_date, "end_date": end_date},
+        )
+        return len(result.all())
+
+    def upsert_adj_factors_from_tushare(
+        self,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> int:
+        result = self.session.execute(
+            text(
+                """
+                INSERT INTO app.adj_factors (
+                    ts_code,
+                    trade_date,
+                    adj_factor,
+                    updated_at
+                )
+                SELECT
+                    ts_code,
+                    trade_date,
+                    adj_factor,
+                    now()
+                FROM tushare.adj_factor
+                WHERE ts_code IS NOT NULL
+                  AND trade_date IS NOT NULL
+                  AND (:start_date IS NULL OR trade_date >= :start_date)
+                  AND (:end_date IS NULL OR trade_date <= :end_date)
+                ON CONFLICT (ts_code, trade_date) DO UPDATE SET
+                    adj_factor = EXCLUDED.adj_factor,
                     updated_at = now()
                 RETURNING 1
                 """

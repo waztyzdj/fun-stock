@@ -59,6 +59,8 @@ tushare.*
 tushare.stock_basic -> app.stocks
 tushare.trade_cal   -> app.trade_calendars
 tushare.daily       -> app.daily_quotes
+tushare.daily_basic -> app.daily_indicators
+tushare.adj_factor  -> app.adj_factors
 ```
 
 raw 表有数据后手动执行：
@@ -191,6 +193,11 @@ Tushare 部分接口需要积分。客户端会识别常见的积分或权限不
 - 将对应 job 标记为 `blocked_insufficient_points`。
 - 本轮不再重复尝试同一个接口，避免浪费请求次数。
 - 不把积分不足当作普通可重试失败处理。
+
+如果 Tushare 返回的是每分钟访问频次限制，而不是积分或权限不足，客户端会按
+`TUSHARE_RATE_LIMIT_SLEEP_SECONDS` 休眠后重试，最多重试
+`TUSHARE_RATE_LIMIT_MAX_RETRIES` 次。这样可以处理“积分等级对应每分钟请求次数较低”的情况，
+同时不会把真正的积分不足误判为可自动恢复。
 
 ## 失败恢复和告警查看
 

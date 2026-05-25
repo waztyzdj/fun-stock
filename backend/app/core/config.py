@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     tushare_scheduler_max_items: int = 5
     tushare_scheduler_alert_limit: int = 20
     tushare_scheduler_lock_ttl_seconds: int = 3600
+    tushare_rate_limit_sleep_seconds: float = 20
+    tushare_rate_limit_max_retries: int = 3
 
     model_config = SettingsConfigDict(
         env_file=".env",

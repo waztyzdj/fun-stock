@@ -52,6 +52,12 @@ class TushareDataQualityService:
                 "接口返回行数大于 0。",
                 str(len(context.records)),
             )
+        if _allows_empty_window(context.api_name):
+            return _passed(
+                "row_count",
+                "该接口窗口允许返回 0 行。",
+                "0",
+            )
         return _warning(
             "row_count",
             "接口返回 0 行。可能是正常空窗口，也可能是参数、交易日或权限异常，"
@@ -163,7 +169,7 @@ def _required_fields_for_api(api_name: str) -> tuple[str, ...]:
     if spec.param_mode is TushareApiParamMode.MONTH:
         return ("month",)
     if spec.param_mode is TushareApiParamMode.CALENDAR_WINDOW:
-        return ("start_date",) if api_name == "new_share" else ()
+        return ("ts_code",) if api_name == "new_share" else ()
     if spec.param_mode is TushareApiParamMode.LIST_STATUS:
         return ("ts_code",)
     return ()
@@ -171,6 +177,16 @@ def _required_fields_for_api(api_name: str) -> tuple[str, ...]:
 
 def _base_api_name(api_name: str) -> str:
     return api_name.removesuffix("_window")
+
+
+def _allows_empty_window(api_name: str) -> bool:
+    spec = TUSHARE_API_SPECS_BY_NAME[_base_api_name(api_name)]
+    return spec.param_mode in {
+        TushareApiParamMode.CALENDAR_WINDOW,
+        TushareApiParamMode.TS_CODE_WINDOW,
+        TushareApiParamMode.TS_CODE_END_DATE,
+        TushareApiParamMode.MONTH,
+    }
 
 
 def _is_empty(value: object) -> bool:

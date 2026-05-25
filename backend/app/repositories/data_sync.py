@@ -56,6 +56,16 @@ class DataSyncRepository:
             )
         )
 
+    def list_jobs(self, *, provider: str, limit: int = 100) -> list[DataSyncJob]:
+        return list(
+            self.session.scalars(
+                select(DataSyncJob)
+                .where(DataSyncJob.provider == provider)
+                .order_by(DataSyncJob.updated_at.desc(), DataSyncJob.api_name)
+                .limit(limit)
+            )
+        )
+
     def list_blocked_jobs(self, *, provider: str, limit: int) -> list[DataSyncJob]:
         return list(
             self.session.scalars(

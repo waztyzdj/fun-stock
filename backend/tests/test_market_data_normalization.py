@@ -27,6 +27,24 @@ class FakeRepository:
         self.daily_quote_end_date = end_date
         return 5
 
+    def upsert_daily_indicators_from_tushare(
+        self,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> int:
+        del start_date, end_date
+        return 7
+
+    def upsert_adj_factors_from_tushare(
+        self,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> int:
+        del start_date, end_date
+        return 11
+
 
 class FakeSession:
     def __init__(self) -> None:
@@ -58,3 +76,5 @@ def test_normalize_core_market_data_commits_and_returns_counts(monkeypatch: Any)
     assert result.stocks == 2
     assert result.trade_calendars == 3
     assert result.daily_quotes == 5
+    assert result.daily_indicators == 7
+    assert result.adj_factors == 11

@@ -79,3 +79,60 @@ class DailyQuote(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
+
+
+class DailyIndicator(Base):
+    __tablename__ = "daily_indicators"
+    __table_args__ = (
+        UniqueConstraint("ts_code", "trade_date", name="uq_daily_indicators_ts_code_trade_date"),
+        Index("ix_daily_indicators_trade_date", "trade_date"),
+        Index("ix_daily_indicators_ts_code", "ts_code"),
+        {"schema": "app"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    ts_code: Mapped[str] = mapped_column(String(16), nullable=False)
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False)
+    close: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    turnover_rate: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    turnover_rate_f: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    volume_ratio: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    pe: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    pe_ttm: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    pb: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    ps: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    ps_ttm: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    dv_ratio: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    dv_ttm: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    total_share: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))
+    float_share: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))
+    free_share: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))
+    total_mv: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))
+    circ_mv: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AdjFactor(Base):
+    __tablename__ = "adj_factors"
+    __table_args__ = (
+        UniqueConstraint("ts_code", "trade_date", name="uq_adj_factors_ts_code_trade_date"),
+        Index("ix_adj_factors_trade_date", "trade_date"),
+        Index("ix_adj_factors_ts_code", "ts_code"),
+        {"schema": "app"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    ts_code: Mapped[str] = mapped_column(String(16), nullable=False)
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False)
+    adj_factor: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )

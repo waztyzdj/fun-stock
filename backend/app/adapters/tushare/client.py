@@ -1,5 +1,6 @@
 from collections.abc import Mapping, Sequence
 from datetime import date
+from time import sleep
 from typing import Any, Protocol
 
 import pandas as pd
@@ -20,6 +21,10 @@ class TushareTokenMissingError(RuntimeError):
 
 
 class TushareInsufficientPointsError(RuntimeError):
+    pass
+
+
+class TushareRateLimitError(RuntimeError):
     pass
 
 
@@ -91,10 +96,13 @@ class TushareDataClient(Protocol):
 
 class TushareClient:
     def __init__(self, token: str | None = None) -> None:
-        self.token = token or get_settings().tushare_token
+        settings = get_settings()
+        self.token = token or settings.tushare_token
         if not self.token:
             raise TushareTokenMissingError("TUSHARE_TOKEN is required to fetch Tushare data.")
         self._pro = ts.pro_api(self.token)
+        self.rate_limit_sleep_seconds = settings.tushare_rate_limit_sleep_seconds
+        self.rate_limit_max_retries = settings.tushare_rate_limit_max_retries
 
     def stock_basic(self) -> list[TushareRecord]:
         fields = [
@@ -317,16 +325,29 @@ class TushareClient:
         fields: Sequence[str] | None = None,
         field_aliases: Mapping[str, str] | None = None,
     ) -> list[TushareRecord]:
-        try:
-            dataframe = self._pro.query(
-                api_name,
-                **dict(params or {}),
-                fields=",".join(fields) if fields else None,
-            )
-        except Exception as exc:
-            if _is_insufficient_points_message(str(exc)):
-                raise TushareInsufficientPointsError(str(exc)) from exc
-            raise
+        dataframe: pd.DataFrame | None = None
+        for attempt in range(self.rate_limit_max_retries + 1):
+            try:
+                dataframe = self._pro.query(
+                    api_name,
+                    **dict(params or {}),
+                    fields=",".join(fields) if fields else None,
+                )
+            except Exception as exc:
+                message = str(exc)
+                if _is_insufficient_points_message(message):
+                    raise TushareInsufficientPointsError(message) from exc
+                if _is_rate_limit_message(message):
+                    if attempt < self.rate_limit_max_retries:
+                        sleep(self.rate_limit_sleep_seconds)
+                        continue
+                    raise TushareRateLimitError(message) from exc
+                raise
+            break
+        else:
+            raise TushareRateLimitError(f"Tushare API {api_name} exceeded rate limit retries.")
+        if dataframe is None:
+            raise TushareRateLimitError(f"Tushare API {api_name} did not return a dataframe.")
         records = self._records_from_dataframe(dataframe)
         if field_aliases is None:
             return records
@@ -413,5 +434,24 @@ def _is_insufficient_points_message(message: str) -> bool:
             "没有访问权限",
             "没有权限",
             "开通权限",
+        )
+    )
+
+
+def _is_rate_limit_message(message: str) -> bool:
+    normalized = message.lower()
+    return any(
+        marker in normalized
+        for marker in (
+            "每分钟",
+            "访问频次",
+            "访问次数",
+            "超过限制",
+            "超过每分钟",
+            "频率",
+            "限流",
+            "too many requests",
+            "rate limit",
+            "try again later",
         )
     )
