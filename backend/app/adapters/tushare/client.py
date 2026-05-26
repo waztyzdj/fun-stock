@@ -28,6 +28,10 @@ class TushareRateLimitError(RuntimeError):
     pass
 
 
+class TushareTransientNetworkError(RuntimeError):
+    pass
+
+
 class TushareDataClient(Protocol):
     def stock_basic(self) -> list[TushareRecord]:
         raise NotImplementedError
@@ -103,6 +107,8 @@ class TushareClient:
         self._pro = ts.pro_api(self.token)
         self.rate_limit_sleep_seconds = settings.tushare_rate_limit_sleep_seconds
         self.rate_limit_max_retries = settings.tushare_rate_limit_max_retries
+        self.network_retry_sleep_seconds = settings.tushare_network_retry_sleep_seconds
+        self.network_max_retries = settings.tushare_network_max_retries
 
     def stock_basic(self) -> list[TushareRecord]:
         fields = [
@@ -326,7 +332,8 @@ class TushareClient:
         field_aliases: Mapping[str, str] | None = None,
     ) -> list[TushareRecord]:
         dataframe: pd.DataFrame | None = None
-        for attempt in range(self.rate_limit_max_retries + 1):
+        max_attempts = max(self.rate_limit_max_retries, self.network_max_retries) + 1
+        for attempt in range(max_attempts):
             try:
                 dataframe = self._pro.query(
                     api_name,
@@ -342,6 +349,11 @@ class TushareClient:
                         sleep(self.rate_limit_sleep_seconds)
                         continue
                     raise TushareRateLimitError(message) from exc
+                if _is_transient_network_message(message):
+                    if attempt < self.network_max_retries:
+                        sleep(self.network_retry_sleep_seconds)
+                        continue
+                    raise TushareTransientNetworkError(message) from exc
                 raise
             break
         else:
@@ -453,5 +465,24 @@ def _is_rate_limit_message(message: str) -> bool:
             "too many requests",
             "rate limit",
             "try again later",
+        )
+    )
+
+
+def _is_transient_network_message(message: str) -> bool:
+    normalized = message.lower()
+    return any(
+        marker in normalized
+        for marker in (
+            "failed to resolve",
+            "name or service not known",
+            "temporary failure in name resolution",
+            "nameresolutionerror",
+            "connectionerror",
+            "max retries exceeded",
+            "connection timed out",
+            "read timed out",
+            "connection aborted",
+            "remote end closed connection",
         )
     )

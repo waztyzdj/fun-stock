@@ -3,6 +3,7 @@ from app.adapters.tushare.client import (
     TushareDataClient,
     TushareInsufficientPointsError,
     TushareRateLimitError,
+    TushareTransientNetworkError,
     TushareTokenMissingError,
 )
 
@@ -11,5 +12,6 @@ __all__ = [
     "TushareDataClient",
     "TushareInsufficientPointsError",
     "TushareRateLimitError",
+    "TushareTransientNetworkError",
     "TushareTokenMissingError",
 ]
