@@ -1,8 +1,11 @@
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 
-from sqlalchemy import Date, bindparam, text
+from sqlalchemy import Date, bindparam, or_, select, text
 from sqlalchemy.orm import Session
+
+from app.models.market import DailyQuote, Stock
 
 
 @dataclass(frozen=True)
@@ -12,6 +15,31 @@ class NormalizationResult:
     daily_quotes: int
     daily_indicators: int = 0
     adj_factors: int = 0
+
+
+@dataclass(frozen=True)
+class StockListItem:
+    ts_code: str
+    symbol: str
+    name: str
+    area: str | None
+    industry: str | None
+    market: str | None
+    exchange: str | None
+    list_status: str | None
+    list_date: date | None
+
+
+@dataclass(frozen=True)
+class StockQuotePoint:
+    trade_date: date
+    open: Decimal | None
+    high: Decimal | None
+    low: Decimal | None
+    close: Decimal | None
+    pct_chg: Decimal | None
+    vol: Decimal | None
+    amount: Decimal | None
 
 
 class MarketDataRepository:
@@ -68,6 +96,71 @@ class MarketDataRepository:
         )
         return len(result.all())
 
+    def list_stocks(self, *, query: str | None = None, limit: int = 50) -> list[StockListItem]:
+        statement = select(Stock).order_by(Stock.ts_code).limit(limit)
+        if query:
+            keyword = f"%{query.strip()}%"
+            statement = statement.where(
+                or_(
+                    Stock.ts_code.ilike(keyword),
+                    Stock.symbol.ilike(keyword),
+                    Stock.name.ilike(keyword),
+                )
+            )
+        return [
+            StockListItem(
+                ts_code=stock.ts_code,
+                symbol=stock.symbol,
+                name=stock.name,
+                area=stock.area,
+                industry=stock.industry,
+                market=stock.market,
+                exchange=stock.exchange,
+                list_status=stock.list_status,
+                list_date=stock.list_date,
+            )
+            for stock in self.session.scalars(statement)
+        ]
+
+    def get_stock(self, ts_code: str) -> StockListItem | None:
+        stock = self.session.get(Stock, ts_code)
+        if stock is None:
+            return None
+        return StockListItem(
+            ts_code=stock.ts_code,
+            symbol=stock.symbol,
+            name=stock.name,
+            area=stock.area,
+            industry=stock.industry,
+            market=stock.market,
+            exchange=stock.exchange,
+            list_status=stock.list_status,
+            list_date=stock.list_date,
+        )
+
+    def list_stock_quotes(self, *, ts_code: str, limit: int = 60) -> list[StockQuotePoint]:
+        statement = (
+            select(DailyQuote)
+            .where(DailyQuote.ts_code == ts_code)
+            .order_by(DailyQuote.trade_date.desc())
+            .limit(limit)
+        )
+        quotes = list(self.session.scalars(statement))
+        quotes.reverse()
+        return [
+            StockQuotePoint(
+                trade_date=quote.trade_date,
+                open=quote.open,
+                high=quote.high,
+                low=quote.low,
+                close=quote.close,
+                pct_chg=quote.pct_chg,
+                vol=quote.vol,
+                amount=quote.amount,
+            )
+            for quote in quotes
+        ]
+
     def upsert_trade_calendars_from_tushare(self) -> int:
         result = self.session.execute(
             text(
@@ -106,7 +199,7 @@ class MarketDataRepository:
     ) -> int:
         result = self.session.execute(
             text(
-                """
+                f"""
                 INSERT INTO app.daily_quotes (
                     ts_code,
                     trade_date,
@@ -137,8 +230,7 @@ class MarketDataRepository:
                 FROM tushare.daily
                 WHERE ts_code IS NOT NULL
                   AND trade_date IS NOT NULL
-                  AND (:start_date IS NULL OR trade_date >= :start_date)
-                  AND (:end_date IS NULL OR trade_date <= :end_date)
+                  {_date_window_sql()}
                 ON CONFLICT (ts_code, trade_date) DO UPDATE SET
                     open = EXCLUDED.open,
                     high = EXCLUDED.high,
@@ -168,7 +260,7 @@ class MarketDataRepository:
     ) -> int:
         result = self.session.execute(
             text(
-                """
+                f"""
                 INSERT INTO app.daily_indicators (
                     ts_code,
                     trade_date,
@@ -213,8 +305,7 @@ class MarketDataRepository:
                 FROM tushare.daily_basic
                 WHERE ts_code IS NOT NULL
                   AND trade_date IS NOT NULL
-                  AND (:start_date IS NULL OR trade_date >= :start_date)
-                  AND (:end_date IS NULL OR trade_date <= :end_date)
+                  {_date_window_sql()}
                 ON CONFLICT (ts_code, trade_date) DO UPDATE SET
                     close = EXCLUDED.close,
                     turnover_rate = EXCLUDED.turnover_rate,
@@ -251,7 +342,7 @@ class MarketDataRepository:
     ) -> int:
         result = self.session.execute(
             text(
-                """
+                f"""
                 INSERT INTO app.adj_factors (
                     ts_code,
                     trade_date,
@@ -266,8 +357,7 @@ class MarketDataRepository:
                 FROM tushare.adj_factor
                 WHERE ts_code IS NOT NULL
                   AND trade_date IS NOT NULL
-                  AND (:start_date IS NULL OR trade_date >= :start_date)
-                  AND (:end_date IS NULL OR trade_date <= :end_date)
+                  {_date_window_sql()}
                 ON CONFLICT (ts_code, trade_date) DO UPDATE SET
                     adj_factor = EXCLUDED.adj_factor,
                     updated_at = now()
@@ -280,3 +370,10 @@ class MarketDataRepository:
             {"start_date": start_date, "end_date": end_date},
         )
         return len(result.all())
+
+
+def _date_window_sql() -> str:
+    return """
+                  AND trade_date >= COALESCE(:start_date, '-infinity'::date)
+                  AND trade_date <= COALESCE(:end_date, 'infinity'::date)
+    """

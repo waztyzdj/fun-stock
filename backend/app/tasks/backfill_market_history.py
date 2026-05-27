@@ -8,7 +8,12 @@ from redis import Redis
 from app.adapters.tushare import TushareInsufficientPointsError
 from app.core.config import get_settings
 from app.core.db import SessionLocal
-from app.engines.data_sync.tushare.market_data_sync import TushareMarketDataSyncService
+from app.engines.data_sync.tushare.market_data_sync import (
+    DEFAULT_START_DATE,
+    TushareMarketDataSyncService,
+)
+from app.models.backfill import BackfillBatch
+from app.repositories.backfill import BackfillRepository
 from app.repositories.data_sync import DataSyncRepository
 from app.services.distributed_lock import RedisDistributedLock
 from app.tasks.sync_tushare_scheduler import PROVIDER
@@ -76,6 +81,7 @@ def _run_quotes_backfill(
 ) -> None:
     batch_index = 0
     consecutive_failures = 0
+    job_id = _create_backfill_job(end_date=end_date)
     while True:
         with SessionLocal() as session:
             service = TushareMarketDataSyncService(session, normalize=False)
@@ -84,10 +90,17 @@ def _run_quotes_backfill(
                 max_trade_days=batch_trade_days,
             )
             if not plan.trade_dates:
+                _mark_backfill_job_success(job_id)
                 _echo_final_status()
                 typer.echo(f"DONE quote backfill completed through {end_date.isoformat()}.")
                 return
             batch_index += 1
+            batch_id = _start_backfill_batch(
+                job_id=job_id,
+                batch_index=batch_index,
+                cursor_date=plan.cursor_date,
+                trade_dates=plan.trade_dates,
+            )
             typer.echo(
                 "START "
                 f"batch={batch_index} "
@@ -103,24 +116,51 @@ def _run_quotes_backfill(
                     normalize=True,
                 )
             except TushareInsufficientPointsError as exc:
-                typer.echo(f"BLOCKED insufficient points or permission: {str(exc).splitlines()[0]}")
+                error_message = _single_line(str(exc))
+                _mark_backfill_batch_failure(
+                    job_id=job_id,
+                    batch_id=batch_id,
+                    error_message=error_message,
+                    blocked=True,
+                )
+                _mark_backfill_job_failure(
+                    job_id=job_id,
+                    error_message=error_message,
+                    blocked=True,
+                )
+                typer.echo(f"BLOCKED insufficient points or permission: {error_message}")
                 _echo_final_status()
                 raise typer.Exit(code=2) from exc
             except Exception as exc:
                 consecutive_failures += 1
+                error_message = _single_line(str(exc))
+                _mark_backfill_batch_failure(
+                    job_id=job_id,
+                    batch_id=batch_id,
+                    error_message=error_message,
+                )
                 typer.echo(
                     "FAILED "
                     f"batch={batch_index} "
                     f"consecutive_failures={consecutive_failures} "
-                    f"error={str(exc).splitlines()[0]}"
+                    f"error={error_message}"
                 )
                 if consecutive_failures >= max_consecutive_failures:
+                    _mark_backfill_job_failure(job_id=job_id, error_message=error_message)
                     _echo_final_status()
                     raise
                 sleep(between_batch_sleep_seconds)
                 continue
 
         consecutive_failures = 0
+        _mark_backfill_batch_success(
+            job_id=job_id,
+            batch_id=batch_id,
+            windows=len(summaries),
+            rows_fetched=sum(summary.rows_fetched for summary in summaries),
+            rows_upserted=sum(summary.rows_upserted for summary in summaries),
+            cursor_date=plan.trade_dates[-1],
+        )
         typer.echo(
             "SUCCESS "
             f"batch={batch_index} "
@@ -129,6 +169,121 @@ def _run_quotes_backfill(
             f"rows_upserted={sum(summary.rows_upserted for summary in summaries)}"
         )
         sleep(between_batch_sleep_seconds)
+
+
+def _create_backfill_job(*, end_date: date) -> int:
+    with SessionLocal() as session:
+        repository = BackfillRepository(session)
+        job = repository.create_job(
+            provider=PROVIDER,
+            task_type="market_quote_history",
+            name=f"日行情历史回填至 {end_date.isoformat()}",
+            start_date=DEFAULT_START_DATE,
+            end_date=end_date,
+            cursor_date=None,
+        )
+        session.commit()
+        return job.id
+
+
+def _start_backfill_batch(
+    *,
+    job_id: int,
+    batch_index: int,
+    cursor_date: date,
+    trade_dates: list[date],
+) -> int:
+    with SessionLocal() as session:
+        repository = BackfillRepository(session)
+        job = repository.get_job(job_id)
+        if job is None:
+            msg = f"Backfill job {job_id} not found."
+            raise RuntimeError(msg)
+        batch = repository.start_batch(
+            job,
+            batch_index=batch_index,
+            cursor_date=cursor_date,
+            trade_dates=trade_dates,
+        )
+        session.commit()
+        return batch.id
+
+
+def _mark_backfill_batch_success(
+    *,
+    job_id: int,
+    batch_id: int,
+    windows: int,
+    rows_fetched: int,
+    rows_upserted: int,
+    cursor_date: date,
+) -> None:
+    with SessionLocal() as session:
+        repository = BackfillRepository(session)
+        job = repository.get_job(job_id)
+        batch = session.get(BackfillBatch, batch_id)
+        if job is None or batch is None:
+            msg = f"Backfill job {job_id} or batch {batch_id} not found."
+            raise RuntimeError(msg)
+        repository.mark_batch_success(
+            job,
+            batch,
+            windows=windows,
+            rows_fetched=rows_fetched,
+            rows_upserted=rows_upserted,
+            cursor_date=cursor_date,
+        )
+        session.commit()
+
+
+def _mark_backfill_batch_failure(
+    *,
+    job_id: int,
+    batch_id: int,
+    error_message: str,
+    blocked: bool = False,
+) -> None:
+    with SessionLocal() as session:
+        repository = BackfillRepository(session)
+        job = repository.get_job(job_id)
+        batch = session.get(BackfillBatch, batch_id)
+        if job is None or batch is None:
+            msg = f"Backfill job {job_id} or batch {batch_id} not found."
+            raise RuntimeError(msg)
+        repository.mark_batch_failure(
+            job,
+            batch,
+            error_message=error_message,
+            blocked=blocked,
+        )
+        session.commit()
+
+
+def _mark_backfill_job_success(job_id: int) -> None:
+    with SessionLocal() as session:
+        repository = BackfillRepository(session)
+        job = repository.get_job(job_id)
+        if job is None:
+            msg = f"Backfill job {job_id} not found."
+            raise RuntimeError(msg)
+        repository.mark_job_success(job)
+        session.commit()
+
+
+def _mark_backfill_job_failure(
+    *,
+    job_id: int,
+    error_message: str,
+    blocked: bool = False,
+) -> None:
+    with SessionLocal() as session:
+        repository = BackfillRepository(session)
+        job = repository.get_job(job_id)
+        if job is None:
+            msg = f"Backfill job {job_id} not found."
+            raise RuntimeError(msg)
+        repository.mark_job_failure(job, error_message=error_message, blocked=blocked)
+        session.commit()
 
 
 def _echo_final_status() -> None:
@@ -153,6 +308,11 @@ def _echo_final_status() -> None:
             f"cursor={job.cursor_value} "
             f"error={str(job.error_message).splitlines()[0] if job.error_message else None}"
         )
+
+
+def _single_line(value: str) -> str:
+    stripped = value.strip()
+    return stripped.splitlines()[0] if stripped else "Unknown error"
 
 
 if __name__ == "__main__":

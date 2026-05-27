@@ -41,6 +41,8 @@ fun_stock
 - `app.data_sync_jobs`：按数据来源和 API 记录持久化同步游标。
 - `app.data_sync_runs`：每个同步窗口的执行日志。
 - `app.data_quality_checks`：每个同步窗口的数据质量检查结果。
+- `app.backfill_jobs`：历史回填任务台账，记录任务范围、游标、批次数和最终状态。
+- `app.backfill_batches`：历史回填批次台账，记录每批交易日范围、窗口数、写入行数和错误信息。
 
 生成的 Tushare 脚本会在以下 schema 下创建原始表：
 
@@ -181,6 +183,73 @@ app.data_quality_checks
 
 质量检查不会直接替代同步失败判定：Tushare 调用失败、数据库写入失败仍会让
 `app.data_sync_runs.status` 变为失败；质量检查用于标记“同步成功但数据值得复核”的情况。
+
+## 回填任务管理和完整性扫描
+
+历史日行情回填不再只依赖 Docker 日志判断进度。`backfill_market_history quotes` 会在
+`app.backfill_jobs` 中创建任务，并把每个批次写入 `app.backfill_batches`。批次状态包括：
+
+- `running`：批次正在执行。
+- `success`：批次内 `daily`、`daily_basic`、`adj_factor` 已完成写入和归一化。
+- `failed`：可重试失败，例如临时网络或数据库异常。
+- `blocked_insufficient_points`：积分或权限不足，需要人工处理，不会自动重复尝试。
+
+核心行情完整性扫描会以 `app.trade_calendars` 中的开市日为基准。默认检查应用层归一化表：
+
+```text
+app.daily_quotes
+app.daily_indicators
+app.adj_factors
+```
+
+也可以通过 `layer=raw` 检查 Tushare 原始层表：
+
+```text
+tushare.daily
+tushare.daily_basic
+tushare.adj_factor
+```
+
+扫描结果包括期望交易日数、已存在交易日数、缺失交易日数、最近有数据日期、缺失日期样例
+和可用于后续修复任务的日期范围。命令：
+
+```powershell
+docker compose run --rm backend uv run python -m app.tasks.sync_tushare_scheduler completeness
+docker compose run --rm backend uv run python -m app.tasks.sync_tushare_scheduler completeness --start-date 2020-01-01 --end-date 2020-12-31
+docker compose run --rm backend uv run python -m app.tasks.sync_tushare_scheduler completeness --layer raw
+```
+
+后端状态 API 会同时返回最近回填任务和完整性摘要：
+
+```text
+GET /api/v1/sync/tushare/status
+GET /api/v1/sync/tushare/completeness?layer=app
+GET /api/v1/sync/tushare/completeness?layer=raw
+```
+
+如果 raw 层已有数据但 app 层缺失，可以只执行归一化修复，不重新调用 Tushare：
+
+```powershell
+docker compose run --rm backend uv run python -m app.tasks.sync_tushare_scheduler repair-core --start-date 2020-01-01 --end-date 2020-01-31
+docker compose run --rm backend uv run python -m app.tasks.sync_tushare_scheduler repair-core --start-date 2020-01-01 --end-date 2020-01-31 --no-dry-run
+```
+
+回填批次状态修正用于处理“数据已经归一化成功，但批次仍显示 failed 或长时间 running”的情况。
+它会扫描 `app.backfill_batches` 中失败或超时运行的批次，确认对应应用层数据完整后再改为 `success`。
+
+```powershell
+docker compose run --rm backend uv run python -m app.tasks.sync_tushare_scheduler fix-backfill-batches --start-date 2020-01-01 --end-date 2020-01-31
+docker compose run --rm backend uv run python -m app.tasks.sync_tushare_scheduler fix-backfill-batches --start-date 2020-01-01 --end-date 2020-01-31 --no-dry-run
+```
+
+对应 API：
+
+```text
+POST /api/v1/sync/tushare/repair?start_date=2020-01-01&end_date=2020-01-31&dry_run=true
+POST /api/v1/sync/tushare/backfill-batches/fix?start_date=2020-01-01&end_date=2020-01-31&dry_run=true
+GET /api/v1/stocks?q=平安&limit=50
+GET /api/v1/stocks/000001.SZ?quote_limit=60
+```
 
 ## 积分和权限不足
 

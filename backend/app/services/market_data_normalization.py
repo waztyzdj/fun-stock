@@ -38,3 +38,35 @@ class MarketDataNormalizationService:
             daily_indicators=daily_indicators,
             adj_factors=adj_factors,
         )
+
+    def normalize_daily_market_data(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> NormalizationResult:
+        daily_quotes = self.repository.upsert_daily_quotes_from_tushare(
+            start_date=start_date,
+            end_date=end_date,
+        )
+        self.session.commit()
+
+        daily_indicators = self.repository.upsert_daily_indicators_from_tushare(
+            start_date=start_date,
+            end_date=end_date,
+        )
+        self.session.commit()
+
+        adj_factors = self.repository.upsert_adj_factors_from_tushare(
+            start_date=start_date,
+            end_date=end_date,
+        )
+        self.session.commit()
+
+        return NormalizationResult(
+            stocks=0,
+            trade_calendars=0,
+            daily_quotes=daily_quotes,
+            daily_indicators=daily_indicators,
+            adj_factors=adj_factors,
+        )

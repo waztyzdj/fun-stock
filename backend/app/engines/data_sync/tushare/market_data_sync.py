@@ -275,7 +275,7 @@ class TushareMarketDataSyncService:
         for trade_date in plan.trade_dates:
             summaries.extend(self._sync_quote_trade_date_batch(trade_date=trade_date))
             if normalize:
-                MarketDataNormalizationService(self.session).normalize_core_market_data(
+                MarketDataNormalizationService(self.session).normalize_daily_market_data(
                     start_date=trade_date,
                     end_date=trade_date,
                 )

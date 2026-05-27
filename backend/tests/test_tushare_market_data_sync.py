@@ -248,6 +248,14 @@ class FakeNormalizationService:
     ) -> None:
         self.normalized_windows.append((start_date, end_date))
 
+    def normalize_daily_market_data(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> None:
+        self.normalized_windows.append((start_date, end_date))
+
 
 def test_sync_quote_data_resumes_from_last_daily_cursor(monkeypatch: Any) -> None:
     fake_client = FakeTushareClient()

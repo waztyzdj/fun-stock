@@ -12,7 +12,7 @@ docker compose up --build
 
 服务地址：
 
-- 前端：http://localhost:5173
+- 前端：http://localhost:5175
 - 后端 API 文档：http://localhost:8000/docs
 - PostgreSQL：`localhost:5432`
 - Redis：`localhost:6380`
@@ -55,7 +55,16 @@ docker compose run --rm backend uv run python -m app.tasks.sync_tushare_schedule
 docker compose run --rm backend uv run python -m app.tasks.sync_tushare_scheduler run-once --dry-run --max-items 5
 docker compose run --rm backend uv run python -m app.tasks.sync_tushare_scheduler alerts --limit 10
 docker compose run --rm backend uv run python -m app.tasks.sync_tushare_scheduler retry-failed --dry-run --max-items 5
+docker compose run --rm backend uv run python -m app.tasks.sync_tushare_scheduler completeness --layer app
+docker compose run --rm backend uv run python -m app.tasks.sync_tushare_scheduler completeness --layer raw
+docker compose run --rm backend uv run python -m app.tasks.sync_tushare_scheduler repair-core --start-date 2020-01-01 --end-date 2020-01-31
+docker compose run --rm backend uv run python -m app.tasks.sync_tushare_scheduler fix-backfill-batches --start-date 2020-01-01 --end-date 2020-01-31
 ```
+
+`repair-core` 默认 dry-run，只从 `tushare.daily`、`tushare.daily_basic`、`tushare.adj_factor`
+归一化修复到 `app.daily_quotes`、`app.daily_indicators`、`app.adj_factors`，不会重新调用
+Tushare。需要实际写入时加 `--no-dry-run`。`fix-backfill-batches` 用于修正 failed 或超时
+running 的回填批次状态，前提是对应应用层数据已经完整。
 
 ## 前端命令
 
@@ -64,6 +73,13 @@ docker compose run --rm --no-deps -e CI=true frontend pnpm install --frozen-lock
 docker compose run --rm --no-deps frontend pnpm lint
 docker compose run --rm --no-deps frontend pnpm build
 ```
+
+前端页面按业务模块放在 `frontend/src/features`：
+
+- `data-sync`：Tushare 同步状态和历史回填任务控制台。
+- `data-quality`：应用层和原始层完整性巡检、归一化修复、回填批次状态修正。
+- `stocks`：股票列表、搜索、基础信息和日行情概览。
+- `strategies`、`backtests`：策略和回测模块占位，后续逐步填充。
 
 ## 开发规范
 

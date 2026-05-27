@@ -1,16 +1,19 @@
 from datetime import date
-from typing import Annotated
+from typing import Annotated, cast
 
 import typer
 
 from app.adapters.tushare.registry import TUSHARE_API_SPECS_BY_NAME
 from app.core.db import SessionLocal
+from app.engines.data_sync.tushare.market_data_sync import DEFAULT_START_DATE
 from app.engines.data_sync.tushare.scheduler import (
     DEFAULT_TS_CODE,
     TushareSyncScheduler,
 )
 from app.models.data_sync import DataQualityCheck, DataSyncJob, DataSyncRun
 from app.repositories.data_sync import DataSyncRepository
+from app.services.data_completeness import CompletenessLayer, CoreMarketCompletenessService
+from app.services.data_repair import CoreMarketDataRepairService
 
 cli = typer.Typer(help="Run planned Tushare synchronization tasks.")
 PROVIDER = "tushare"
@@ -262,6 +265,160 @@ def plan(
     typer.echo(f"Tushare scheduler due plans: {len(windows)}")
 
 
+@cli.command("completeness")
+def completeness(
+    start_date: Annotated[
+        str | None,
+        typer.Option(help="Completeness scan start date, YYYY-MM-DD. Defaults to 2000-01-01."),
+    ] = None,
+    end_date: Annotated[
+        str | None,
+        typer.Option(help="Completeness scan end date, YYYY-MM-DD. Defaults to today."),
+    ] = None,
+    missing_limit: Annotated[
+        int,
+        typer.Option(help="Maximum missing dates to print per table."),
+    ] = 20,
+    layer: Annotated[
+        str,
+        typer.Option(help="Completeness layer: app or raw."),
+    ] = "app",
+) -> None:
+    with SessionLocal() as session:
+        report = CoreMarketCompletenessService(session).scan(
+            start_date=parse_date(start_date) or DEFAULT_START_DATE,
+            end_date=parse_date(end_date) or date.today(),
+            layer=_parse_completeness_layer(layer),
+            missing_limit=missing_limit,
+        )
+
+    typer.echo(
+        "CORE_COMPLETENESS "
+        f"layer={report.layer} "
+        f"exchange={report.exchange} "
+        f"start_date={report.start_date} "
+        f"end_date={report.end_date} "
+        f"total_missing_trade_days={report.total_missing_trade_days}"
+    )
+    for table in report.tables:
+        missing_dates = ",".join(day.strftime("%Y%m%d") for day in table.missing_dates) or "-"
+        repair_ranges = (
+            ",".join(
+                f"{item.start_date.strftime('%Y%m%d')}-{item.end_date.strftime('%Y%m%d')}"
+                for item in table.repair_ranges[:10]
+            )
+            or "-"
+        )
+        typer.echo(
+            "TABLE "
+            f"api={table.api_name} "
+            f"expected={table.expected_trade_days} "
+            f"present={table.present_trade_days} "
+            f"missing={table.missing_trade_days} "
+            f"latest_present={table.latest_present_date} "
+            f"ratio={table.completeness_ratio:.4f} "
+            f"missing_dates={missing_dates} "
+            f"repair_ranges={repair_ranges}"
+        )
+
+
+@cli.command("repair-core")
+def repair_core(
+    start_date: Annotated[
+        str,
+        typer.Option(help="Repair start date, YYYY-MM-DD."),
+    ],
+    end_date: Annotated[
+        str,
+        typer.Option(help="Repair end date, YYYY-MM-DD."),
+    ],
+    dry_run: Annotated[
+        bool,
+        typer.Option(help="Preview repair plan without writing app tables."),
+    ] = True,
+    fix_batches: Annotated[
+        bool,
+        typer.Option(help="Also fix failed or stale running backfill batch statuses."),
+    ] = True,
+) -> None:
+    with SessionLocal() as session:
+        service = CoreMarketDataRepairService(session)
+        parsed_start_date = date.fromisoformat(start_date)
+        parsed_end_date = date.fromisoformat(end_date)
+        if fix_batches:
+            summary = service.repair_and_fix_batches(
+                start_date=parsed_start_date,
+                end_date=parsed_end_date,
+                dry_run=dry_run,
+            )
+            result = summary.data_repair
+            batch_fix = summary.batch_fix
+        else:
+            result = service.repair(
+                start_date=parsed_start_date,
+                end_date=parsed_end_date,
+                dry_run=dry_run,
+            )
+            batch_fix = None
+
+    typer.echo(
+        "CORE_REPAIR "
+        f"start_date={result.plan.start_date} "
+        f"end_date={result.plan.end_date} "
+        f"missing_trade_days={result.plan.missing_trade_days} "
+        f"executed={result.executed} "
+        f"daily_quotes={result.daily_quotes} "
+        f"daily_indicators={result.daily_indicators} "
+        f"adj_factors={result.adj_factors}"
+    )
+    for range_start, range_end, days in result.plan.repair_ranges[:20]:
+        typer.echo(f"REPAIR_RANGE start_date={range_start} end_date={range_end} days={days}")
+    if batch_fix is not None:
+        typer.echo(
+            "BACKFILL_BATCH_FIX "
+            f"scanned={batch_fix.scanned_batches} "
+            f"fixed={batch_fix.fixed_batches} "
+            f"still_failed={batch_fix.still_failed_batches} "
+            f"stale_running={batch_fix.stale_running_batches}"
+        )
+
+
+@cli.command("fix-backfill-batches")
+def fix_backfill_batches(
+    start_date: Annotated[
+        str,
+        typer.Option(help="Batch scan start date, YYYY-MM-DD."),
+    ],
+    end_date: Annotated[
+        str,
+        typer.Option(help="Batch scan end date, YYYY-MM-DD."),
+    ],
+    dry_run: Annotated[
+        bool,
+        typer.Option(help="Preview fixes without updating batch status."),
+    ] = True,
+    stale_after_minutes: Annotated[
+        int,
+        typer.Option(help="Treat running batches older than this as stale."),
+    ] = 180,
+) -> None:
+    with SessionLocal() as session:
+        result = CoreMarketDataRepairService(session).fix_backfill_batches(
+            start_date=date.fromisoformat(start_date),
+            end_date=date.fromisoformat(end_date),
+            dry_run=dry_run,
+            stale_after_minutes=stale_after_minutes,
+        )
+    typer.echo(
+        "BACKFILL_BATCH_FIX "
+        f"scanned={result.scanned_batches} "
+        f"fixed={result.fixed_batches} "
+        f"still_failed={result.still_failed_batches} "
+        f"stale_running={result.stale_running_batches} "
+        f"executed={not dry_run}"
+    )
+
+
 def _format_problem_run(run: DataSyncRun) -> str:
     return " ".join(
         [
@@ -309,6 +466,12 @@ def _single_line(value: str | None) -> str | None:
     if value is None:
         return None
     return value.strip().splitlines()[0] if value.strip() else None
+
+
+def _parse_completeness_layer(value: str) -> CompletenessLayer:
+    if value not in {"app", "raw"}:
+        raise typer.BadParameter("layer must be app or raw.")
+    return cast(CompletenessLayer, value)
 
 
 if __name__ == "__main__":
