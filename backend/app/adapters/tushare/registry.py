@@ -88,14 +88,6 @@ TUSHARE_API_SPECS: tuple[TushareApiSpec, ...] = (
         field_aliases={"st_type": "st_tpye"},
     ),
     TushareApiSpec(
-        "stock_hsgt",
-        "stock_hsgt",
-        TushareApiCategory.BASIC,
-        "沪深港通股票列表",
-        398,
-        TushareApiParamMode.TRADE_DATE,
-    ),
-    TushareApiSpec(
         "namechange",
         "namechange",
         TushareApiCategory.BASIC,
@@ -144,19 +136,19 @@ TUSHARE_API_SPECS: tuple[TushareApiSpec, ...] = (
         TushareApiParamMode.CALENDAR_WINDOW,
     ),
     TushareApiSpec(
-        "bak_basic",
-        "bak_basic",
-        TushareApiCategory.BASIC,
-        "股票历史列表",
-        262,
-        TushareApiParamMode.TRADE_DATE,
-    ),
-    TushareApiSpec(
         "daily",
         "daily",
         TushareApiCategory.QUOTE,
         "A 股日线行情",
         27,
+        TushareApiParamMode.TRADE_DATE,
+    ),
+    TushareApiSpec(
+        "index_daily",
+        "index_daily",
+        TushareApiCategory.QUOTE,
+        "指数日线行情",
+        95,
         TushareApiParamMode.TRADE_DATE,
     ),
     TushareApiSpec(
@@ -294,14 +286,6 @@ TUSHARE_API_SPECS: tuple[TushareApiSpec, ...] = (
         TushareApiParamMode.MONTH,
     ),
     TushareApiSpec(
-        "bak_daily",
-        "bak_daily",
-        TushareApiCategory.QUOTE,
-        "备用行情",
-        255,
-        TushareApiParamMode.TRADE_DATE,
-    ),
-    TushareApiSpec(
         "income",
         "income",
         TushareApiCategory.FINANCE,
@@ -315,14 +299,6 @@ TUSHARE_API_SPECS: tuple[TushareApiSpec, ...] = (
         TushareApiCategory.FINANCE,
         "资产负债表",
         36,
-        TushareApiParamMode.TS_CODE_WINDOW,
-    ),
-    TushareApiSpec(
-        "cashflow_vip",
-        "cashflow_vip",
-        TushareApiCategory.FINANCE,
-        "现金流量表",
-        44,
         TushareApiParamMode.TS_CODE_WINDOW,
     ),
     TushareApiSpec(

@@ -45,7 +45,12 @@ class FakeNormalizationService:
         return type(
             "Result",
             (),
-            {"daily_quotes": 1, "daily_indicators": 2, "adj_factors": 3},
+            {
+                "daily_quotes": 1,
+                "index_daily_quotes": 4,
+                "daily_indicators": 2,
+                "adj_factors": 3,
+            },
         )()
 
 
@@ -113,6 +118,7 @@ def test_repair_executes_daily_normalization(monkeypatch: MonkeyPatch) -> None:
 
     assert result.executed is True
     assert result.daily_quotes == 1
+    assert result.index_daily_quotes == 4
     assert result.daily_indicators == 2
     assert result.adj_factors == 3
     assert FakeNormalizationService.called is True

@@ -138,7 +138,14 @@ def _default_schedule_for_spec(spec: TushareApiSpec) -> TushareScheduleKind:
 def _default_priority_for_spec(spec: TushareApiSpec) -> int:
     if spec.api_name in {"stock_basic", "trade_cal"}:
         return 10
-    if spec.api_name in {"daily", "daily_basic", "adj_factor", "stk_limit", "suspend_d"}:
+    if spec.api_name in {
+        "daily",
+        "daily_basic",
+        "adj_factor",
+        "index_daily",
+        "stk_limit",
+        "suspend_d",
+    }:
         return 20
     if spec.category is TushareApiCategory.FINANCE:
         return 40
@@ -166,7 +173,7 @@ def _default_lookback_days_for_spec(spec: TushareApiSpec) -> int:
 
 
 def _default_sleep_seconds_for_spec(spec: TushareApiSpec) -> float:
-    if spec.api_name in {"cashflow_vip", "stk_mins"}:
+    if spec.api_name == "stk_mins":
         return 65
     return 0
 
@@ -402,7 +409,7 @@ class TushareSyncScheduler:
         plan: TushareSyncPlan,
         job: DataSyncJob | None,
     ) -> DataSyncJob | None:
-        if plan.api_name in {"daily", "daily_basic", "adj_factor"}:
+        if plan.api_name in {"daily", "daily_basic", "adj_factor", "index_daily"}:
             return self.repository.get_job(provider=PROVIDER, api_name="daily") or job
         return job
 

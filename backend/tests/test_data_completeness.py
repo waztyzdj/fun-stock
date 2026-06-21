@@ -56,6 +56,7 @@ def test_completeness_scan_uses_app_tables_by_default() -> None:
 
     assert report.layer == "app"
     assert any("app.daily_quotes" in sql_text for sql_text in session.sql_texts)
+    assert any("app.index_daily_quotes" in sql_text for sql_text in session.sql_texts)
     assert any("app.daily_indicators" in sql_text for sql_text in session.sql_texts)
     assert any("app.adj_factors" in sql_text for sql_text in session.sql_texts)
 
@@ -71,5 +72,6 @@ def test_completeness_scan_can_use_raw_tables() -> None:
 
     assert report.layer == "raw"
     assert any("tushare.daily" in sql_text for sql_text in session.sql_texts)
+    assert any("tushare.index_daily" in sql_text for sql_text in session.sql_texts)
     assert any("tushare.daily_basic" in sql_text for sql_text in session.sql_texts)
     assert any("tushare.adj_factor" in sql_text for sql_text in session.sql_texts)

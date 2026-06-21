@@ -20,8 +20,8 @@ from app.services.market_data_normalization import MarketDataNormalizationServic
 PROVIDER = "tushare"
 DEFAULT_START_DATE = date(2000, 1, 1)
 TRADE_CALENDAR_EXCHANGE = "SSE"
-QUOTE_DAILY_TABLES = ("daily", "daily_basic", "adj_factor")
-FINANCE_TABLES = ("income", "balancesheet", "cashflow_vip", "fina_indicator")
+QUOTE_DAILY_TABLES = ("daily", "daily_basic", "adj_factor", "index_daily")
+FINANCE_TABLES = ("income", "balancesheet", "fina_indicator")
 
 
 @dataclass(frozen=True)
@@ -88,12 +88,14 @@ class TushareMarketDataSyncService:
         end_date: date | None = None,
         ts_code: str | None = None,
         month: str | None = None,
+        cursor_value: str | None = None,
+        sync_mode: str = "manual_probe",
     ) -> SyncSummary:
         spec = TUSHARE_API_SPECS_BY_NAME[api_name]
         self.raw_repository.ensure_tables_exist([spec.table_name])
         window_start = self._window_value(start_date or trade_date, month)
         window_end = self._window_value(end_date or trade_date, month)
-        cursor_value = self._window_value(end_date or trade_date, month)
+        effective_cursor_value = cursor_value or self._window_value(end_date or trade_date, month)
         try:
             records = self.client.query_api(
                 api_name,
@@ -109,7 +111,7 @@ class TushareMarketDataSyncService:
                 window_start=window_start,
                 window_end=window_end,
                 error_message=str(exc),
-                sync_mode="manual_probe",
+                sync_mode=sync_mode,
             )
             raise
         except Exception as exc:
@@ -118,7 +120,7 @@ class TushareMarketDataSyncService:
                 window_start=window_start,
                 window_end=window_end,
                 error_message=str(exc),
-                sync_mode="manual_probe",
+                sync_mode=sync_mode,
             )
             raise
         return self._sync_window_table(
@@ -127,8 +129,8 @@ class TushareMarketDataSyncService:
             records=records,
             window_start=window_start,
             window_end=window_end,
-            cursor_value=cursor_value,
-            sync_mode="manual_probe",
+            cursor_value=effective_cursor_value,
+            sync_mode=sync_mode,
         )
 
     def _mark_prefetch_blocked(
@@ -295,6 +297,38 @@ class TushareMarketDataSyncService:
             summaries.extend(self.sync_quote_trade_date_all(trade_date=trade_date))
         return summaries
 
+    def sync_index_daily_window(
+        self,
+        *,
+        ts_codes: tuple[str, ...],
+        start_date: date,
+        end_date: date,
+        normalize: bool = True,
+    ) -> list[SyncSummary]:
+        self.raw_repository.ensure_tables_exist(["index_daily"])
+        summaries = [
+            self._sync_window_table(
+                api_name="index_daily",
+                table_name="index_daily",
+                records=self.client.index_daily_window(
+                    ts_code=ts_code,
+                    start_date=start_date,
+                    end_date=end_date,
+                ),
+                window_start=self._format_date(start_date),
+                window_end=self._format_date(end_date),
+                cursor_value=f"{ts_code}:{self._format_date(end_date)}",
+                sync_mode="benchmark_window",
+            )
+            for ts_code in ts_codes
+        ]
+        if normalize:
+            MarketDataNormalizationService(self.session).normalize_daily_market_data(
+                start_date=start_date,
+                end_date=end_date,
+            )
+        return summaries
+
     def sync_quote_trade_date(self, *, trade_date: date) -> SyncSummary:
         return self.sync_quote_trade_date_all(trade_date=trade_date)[0]
 
@@ -328,6 +362,15 @@ class TushareMarketDataSyncService:
                 cursor_value=self._format_date(trade_date),
                 sync_mode="by_trade_date_window",
             ),
+            self._sync_window_table(
+                api_name="index_daily_window",
+                table_name="index_daily",
+                records=self.client.index_daily(trade_date=trade_date),
+                window_start=self._format_date(trade_date),
+                window_end=self._format_date(trade_date),
+                cursor_value=self._format_date(trade_date),
+                sync_mode="by_trade_date_window",
+            ),
         ]
 
     def _sync_quote_trade_date_batch(self, *, trade_date: date) -> list[SyncSummary]:
@@ -343,6 +386,11 @@ class TushareMarketDataSyncService:
                 "adj_factor",
                 "adj_factor",
                 self.client.adj_factor(trade_date=trade_date),
+            ),
+            QuoteApiPayload(
+                "index_daily",
+                "index_daily",
+                self.client.index_daily(trade_date=trade_date),
             ),
         ]
         jobs_and_runs = [
@@ -439,15 +487,6 @@ class TushareMarketDataSyncService:
                 "balancesheet",
                 "balancesheet",
                 lambda: self.client.balancesheet(
-                    start_date=start_date,
-                    end_date=end_date,
-                    ts_code=ts_code,
-                ),
-            ),
-            (
-                "cashflow_vip",
-                "cashflow_vip",
-                lambda: self.client.cashflow_vip(
                     start_date=start_date,
                     end_date=end_date,
                     ts_code=ts_code,

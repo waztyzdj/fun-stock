@@ -144,6 +144,50 @@ export function StocksPage() {
             </div>
           </div>
 
+          <section className="stock-factor-section">
+            <div className="panel-heading">
+              <h2>基本面指标</h2>
+              <span>{(detail?.factors.length ?? 0).toLocaleString('zh-CN')} 个最新指标</span>
+            </div>
+            <div className="stock-factor-grid">
+              {(detail?.factors ?? []).map((factor) => (
+                <div className="stock-factor-card" key={factor.factor_code}>
+                  <span>{stockFactorLabel(factor.factor_code)}</span>
+                  <strong>{formatNumber(factor.value)}</strong>
+                  <small>
+                    {factor.report_end_date ?? factor.factor_date} / {factor.factor_code}
+                  </small>
+                </div>
+              ))}
+              {(detail?.factors.length ?? 0) === 0 ? (
+                <p className="empty-text">暂无基本面因子数据，请先在策略模块执行因子计算。</p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="stock-factor-section">
+            <div className="panel-heading">
+              <h2>指标趋势</h2>
+              <span>最近 12 期</span>
+            </div>
+            <div className="factor-trend-list">
+              {groupFactorHistory(detail?.factor_history ?? []).map((group) => (
+                <article className="factor-trend-row" key={group.factorCode}>
+                  <strong>{stockFactorLabel(group.factorCode)}</strong>
+                  <div className="factor-trend-bars">
+                    {group.points.map((point) => (
+                      <span
+                        key={`${group.factorCode}-${point.factor_date}`}
+                        style={{ height: `${String(point.height)}%` }}
+                        title={`${point.report_end_date ?? point.factor_date}: ${point.value}`}
+                      />
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+
           <div className="sparkline" aria-label="最近收盘价走势">
             {chartPoints.map((point) => (
               <span
@@ -184,6 +228,55 @@ export function StocksPage() {
       </section>
     </section>
   );
+}
+
+function stockFactorLabel(code: string): string {
+  const labels: Record<string, string> = {
+    debt_to_assets: '资产负债率',
+    dv_ttm: '股息率 TTM',
+    grossprofit_margin: '毛利率',
+    netprofit_margin: '净利率',
+    netprofit_yoy: '净利润同比',
+    ocf_to_profit: '现金流质量',
+    or_yoy: '营收同比',
+    pb: '市净率',
+    pe_ttm: '市盈率 TTM',
+    roe: 'ROE',
+  };
+  return labels[code] ?? code;
+}
+
+function formatNumber(value: string): string {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return value;
+  }
+  return parsed.toFixed(2);
+}
+
+function groupFactorHistory(points: StockDetail['factor_history']) {
+  const groups = new Map<string, StockDetail['factor_history']>();
+  for (const point of points) {
+    const group = groups.get(point.factor_code) ?? [];
+    group.push(point);
+    groups.set(point.factor_code, group);
+  }
+  return [...groups.entries()].map(([factorCode, groupPoints]) => {
+    const values = groupPoints.map((point) => Number(point.value)).filter(Number.isFinite);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    return {
+      factorCode,
+      points: groupPoints.map((point) => {
+        const value = Number(point.value);
+        const ratio = max === min ? 0.5 : (value - min) / (max - min);
+        return {
+          ...point,
+          height: Number.isFinite(ratio) ? Math.max(8, Math.round(ratio * 100)) : 8,
+        };
+      }),
+    };
+  });
 }
 
 function SummaryItem(props: { label: string; value: string }) {

@@ -18,10 +18,14 @@ class Settings(BaseSettings):
     celery_result_backend: str | None = None
     timezone: str = "Asia/Shanghai"
     tushare_token: str | None = None
-    tushare_scheduler_api_names: str = "stock_basic,trade_cal,daily,daily_basic,adj_factor"
+    tushare_scheduler_api_names: str = (
+        "stock_basic,trade_cal,daily,daily_basic,adj_factor,index_daily"
+    )
     tushare_scheduler_max_items: int = 5
     tushare_scheduler_alert_limit: int = 20
     tushare_scheduler_lock_ttl_seconds: int = 3600
+    tushare_startup_catchup_enabled: bool = True
+    tushare_startup_retry_failed_enabled: bool = True
     tushare_rate_limit_sleep_seconds: float = 20
     tushare_rate_limit_max_retries: int = 3
     tushare_network_retry_sleep_seconds: float = 60

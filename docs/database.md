@@ -38,6 +38,7 @@ fun_stock
 - `app.stocks`：归一化股票身份和上市信息。
 - `app.trade_calendars`：交易所交易日历。
 - `app.daily_quotes`：日线 OHLCV 行情。
+- `app.index_daily_quotes`：指数日线 OHLCV 行情，用于真实指数回测基准。
 - `app.data_sync_jobs`：按数据来源和 API 记录持久化同步游标。
 - `app.data_sync_runs`：每个同步窗口的执行日志。
 - `app.data_quality_checks`：每个同步窗口的数据质量检查结果。
@@ -61,6 +62,7 @@ tushare.*
 tushare.stock_basic -> app.stocks
 tushare.trade_cal   -> app.trade_calendars
 tushare.daily       -> app.daily_quotes
+tushare.index_daily -> app.index_daily_quotes
 tushare.daily_basic -> app.daily_indicators
 tushare.adj_factor  -> app.adj_factors
 ```
@@ -116,6 +118,7 @@ docker compose run --rm backend uv run python -m app.tasks.sync_tushare_market_d
 docker compose run --rm backend uv run python -m app.tasks.sync_tushare_market_data quotes-plan
 docker compose run --rm backend uv run python -m app.tasks.sync_tushare_market_data quotes --max-trade-days 5 --sleep-seconds 0.2
 docker compose run --rm backend uv run python -m app.tasks.sync_tushare_market_data quotes-window --start-date 2026-05-22 --end-date 2026-05-22
+docker compose run --rm backend uv run python -m app.tasks.sync_tushare_market_data benchmark-indexes --start-date 2020-01-01
 docker compose run --rm backend uv run python -m app.tasks.sync_tushare_market_data finance --start-date 2026-01-01
 docker compose run --rm backend uv run python -m app.tasks.sync_tushare_market_data finance --start-date 2026-01-01 --ts-code 000001.SZ --api income
 ```
@@ -129,11 +132,13 @@ docker compose run --rm backend uv run python -m app.tasks.sync_tushare_market_d
 完整接口排查台账见 [Tushare 接口覆盖台账](tushare-interface-coverage.md)。该台账记录
 raw 表、客户端获取、同步服务和小批量验证状态。
 
-正式 `quotes` 补拉会对每个交易日同步 `daily`、`daily_basic` 和 `adj_factor`。这三张
-日频行情表被视为同一个交易日批次，只有三份 API 数据都成功写入后，才推进对应游标。
+正式 `quotes` 补拉会对每个交易日同步 `daily`、`daily_basic`、`adj_factor` 和
+`index_daily`。这四张日频行情表被视为同一个交易日批次，只有四份 API 数据都成功写入后，
+才推进对应游标。
 
-统一计划调度同样会让 `daily`、`daily_basic` 和 `adj_factor` 共用 `daily` 的补拉游标，
-避免三张核心日频表错开交易日。对按 `trade_date` 同步的接口，调度器会根据
+统一计划调度同样会让 `daily`、`daily_basic`、`adj_factor` 和 `index_daily` 共用
+`daily` 的补拉游标，
+避免四张核心日频表错开交易日。对按 `trade_date` 同步的接口，调度器会根据
 `tushare.trade_cal` 选择下一个开市交易日，不会在周末或节假日直接推进行情游标。
 
 财务 API 按 `ts_code` 同步。部分 VIP 财务接口有严格频率限制。验证或恢复失败任务时，
@@ -166,8 +171,9 @@ app.data_sync_runs
 app.data_quality_checks
 ```
 
-其中正式历史日行情补拉使用 `daily`、`daily_basic`、`adj_factor` 三个同步任务名；临时窗口
-验证使用 `daily_window`、`daily_basic_window`、`adj_factor_window`，避免污染正式补拉游标。
+其中正式历史日行情补拉使用 `daily`、`daily_basic`、`adj_factor`、`index_daily` 四个
+同步任务名；临时窗口验证使用 `daily_window`、`daily_basic_window`、`adj_factor_window`、
+`index_daily_window`，避免污染正式补拉游标。
 
 ## 数据质量检查
 
@@ -190,7 +196,7 @@ app.data_quality_checks
 `app.backfill_jobs` 中创建任务，并把每个批次写入 `app.backfill_batches`。批次状态包括：
 
 - `running`：批次正在执行。
-- `success`：批次内 `daily`、`daily_basic`、`adj_factor` 已完成写入和归一化。
+- `success`：批次内 `daily`、`daily_basic`、`adj_factor`、`index_daily` 已完成写入和归一化。
 - `failed`：可重试失败，例如临时网络或数据库异常。
 - `blocked_insufficient_points`：积分或权限不足，需要人工处理，不会自动重复尝试。
 
@@ -198,6 +204,7 @@ app.data_quality_checks
 
 ```text
 app.daily_quotes
+app.index_daily_quotes
 app.daily_indicators
 app.adj_factors
 ```
@@ -206,6 +213,7 @@ app.adj_factors
 
 ```text
 tushare.daily
+tushare.index_daily
 tushare.daily_basic
 tushare.adj_factor
 ```
@@ -326,7 +334,7 @@ docker compose run --rm backend uv run python -m app.tasks.sync_tushare_schedule
 默认小范围接口由环境变量控制：
 
 ```text
-TUSHARE_SCHEDULER_API_NAMES=stock_basic,trade_cal,daily,daily_basic,adj_factor
+TUSHARE_SCHEDULER_API_NAMES=stock_basic,trade_cal,daily,daily_basic,adj_factor,index_daily
 TUSHARE_SCHEDULER_MAX_ITEMS=5
 ```
 

@@ -42,6 +42,18 @@ class TushareDataClient(Protocol):
     def daily(self, *, trade_date: date) -> list[TushareRecord]:
         raise NotImplementedError
 
+    def index_daily(self, *, trade_date: date) -> list[TushareRecord]:
+        raise NotImplementedError
+
+    def index_daily_window(
+        self,
+        *,
+        ts_code: str,
+        start_date: date,
+        end_date: date,
+    ) -> list[TushareRecord]:
+        raise NotImplementedError
+
     def daily_basic(self, *, trade_date: date) -> list[TushareRecord]:
         raise NotImplementedError
 
@@ -58,15 +70,6 @@ class TushareDataClient(Protocol):
         raise NotImplementedError
 
     def balancesheet(
-        self,
-        *,
-        start_date: date,
-        end_date: date,
-        ts_code: str | None = None,
-    ) -> list[TushareRecord]:
-        raise NotImplementedError
-
-    def cashflow_vip(
         self,
         *,
         start_date: date,
@@ -177,6 +180,54 @@ class TushareClient:
             ],
         )
 
+    def index_daily(self, *, trade_date: date) -> list[TushareRecord]:
+        return self._call(
+            "index_daily",
+            params={"trade_date": self._format_date(trade_date)},
+            fields=[
+                "ts_code",
+                "trade_date",
+                "open",
+                "high",
+                "low",
+                "close",
+                "pre_close",
+                "change",
+                "pct_chg",
+                "vol",
+                "amount",
+            ],
+        )
+
+    def index_daily_window(
+        self,
+        *,
+        ts_code: str,
+        start_date: date,
+        end_date: date,
+    ) -> list[TushareRecord]:
+        return self._call(
+            "index_daily",
+            params={
+                "ts_code": ts_code,
+                "start_date": self._format_date(start_date),
+                "end_date": self._format_date(end_date),
+            },
+            fields=[
+                "ts_code",
+                "trade_date",
+                "open",
+                "high",
+                "low",
+                "close",
+                "pre_close",
+                "change",
+                "pct_chg",
+                "vol",
+                "amount",
+            ],
+        )
+
     def daily_basic(self, *, trade_date: date) -> list[TushareRecord]:
         return self._call(
             "daily_basic",
@@ -233,20 +284,6 @@ class TushareClient:
     ) -> list[TushareRecord]:
         return self._finance_call(
             "balancesheet",
-            start_date=start_date,
-            end_date=end_date,
-            ts_code=ts_code,
-        )
-
-    def cashflow_vip(
-        self,
-        *,
-        start_date: date,
-        end_date: date,
-        ts_code: str | None = None,
-    ) -> list[TushareRecord]:
-        return self._finance_call(
-            "cashflow_vip",
             start_date=start_date,
             end_date=end_date,
             ts_code=ts_code,

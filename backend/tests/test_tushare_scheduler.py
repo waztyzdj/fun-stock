@@ -102,7 +102,7 @@ def test_default_scheduler_plans_cover_every_registered_tushare_api() -> None:
     planned_api_names = {plan.api_name for plan in TUSHARE_SYNC_PLANS}
 
     assert planned_api_names == registered_api_names
-    assert len(TUSHARE_SYNC_PLANS) == 41
+    assert len(TUSHARE_SYNC_PLANS) == 38
 
 
 def test_scheduler_plan_due_windows_skips_manual_apis_by_default(
@@ -247,6 +247,7 @@ def test_core_daily_tables_share_daily_cursor(monkeypatch: MonkeyPatch) -> None:
         TushareSyncPlan(api_name="daily", schedule=TushareScheduleKind.DAILY, priority=1),
         TushareSyncPlan(api_name="daily_basic", schedule=TushareScheduleKind.DAILY, priority=2),
         TushareSyncPlan(api_name="adj_factor", schedule=TushareScheduleKind.DAILY, priority=3),
+        TushareSyncPlan(api_name="index_daily", schedule=TushareScheduleKind.DAILY, priority=4),
     )
 
     scheduler = TushareSyncScheduler(
@@ -257,7 +258,12 @@ def test_core_daily_tables_share_daily_cursor(monkeypatch: MonkeyPatch) -> None:
 
     windows = scheduler.plan_due_windows(run_date=date(2026, 5, 24))
 
-    assert [window.api_name for window in windows] == ["daily", "daily_basic", "adj_factor"]
+    assert [window.api_name for window in windows] == [
+        "daily",
+        "daily_basic",
+        "adj_factor",
+        "index_daily",
+    ]
     assert {window.trade_date for window in windows} == {date(2026, 5, 21)}
 
 

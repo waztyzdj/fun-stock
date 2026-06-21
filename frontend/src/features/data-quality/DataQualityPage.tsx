@@ -213,7 +213,8 @@ export function DataQualityPage() {
             ))}
             {repairResult ? (
               <p className="empty-text">
-                写入：日行情 {repairResult.daily_quotes.toLocaleString('zh-CN')}，每日指标{' '}
+                写入：日行情 {repairResult.daily_quotes.toLocaleString('zh-CN')}，指数日线{' '}
+                {repairResult.index_daily_quotes.toLocaleString('zh-CN')}，每日指标{' '}
                 {repairResult.daily_indicators.toLocaleString('zh-CN')}，复权因子{' '}
                 {repairResult.adj_factors.toLocaleString('zh-CN')}
               </p>
@@ -413,7 +414,8 @@ function RepairStep({ report, repairResult, layer, loading, onDryRun, onExecute 
       </div>
       {repairResult ? (
         <div className="quality-action-summary">
-          写入：日行情 {repairResult.daily_quotes.toLocaleString('zh-CN')}，每日指标{' '}
+          写入：日行情 {repairResult.daily_quotes.toLocaleString('zh-CN')}，指数日线{' '}
+          {repairResult.index_daily_quotes.toLocaleString('zh-CN')}，每日指标{' '}
           {repairResult.daily_indicators.toLocaleString('zh-CN')}，复权因子{' '}
           {repairResult.adj_factors.toLocaleString('zh-CN')}。
         </div>

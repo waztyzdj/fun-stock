@@ -10,14 +10,12 @@ $docs = @(
     @{ Group = "basic"; DocId = 26;  FallbackApi = "trade_cal" },
     @{ Group = "basic"; DocId = 397; FallbackApi = "stock_st" },
     @{ Group = "basic"; DocId = 423; FallbackApi = "stock_st_warning" },
-    @{ Group = "basic"; DocId = 398; FallbackApi = $null },
     @{ Group = "basic"; DocId = 100; FallbackApi = "namechange" },
     @{ Group = "basic"; DocId = 112; FallbackApi = "stock_company" },
     @{ Group = "basic"; DocId = 193; FallbackApi = "stk_managers" },
     @{ Group = "basic"; DocId = 194; FallbackApi = "stk_rewards" },
     @{ Group = "basic"; DocId = 375; FallbackApi = $null },
     @{ Group = "basic"; DocId = 123; FallbackApi = "new_share" },
-    @{ Group = "basic"; DocId = 262; FallbackApi = $null },
 
     @{ Group = "quote"; DocId = 27;  FallbackApi = "daily" },
     @{ Group = "quote"; DocId = 372; FallbackApi = "rt_k" },
@@ -38,11 +36,9 @@ $docs = @(
     @{ Group = "quote"; DocId = 49;  FallbackApi = "ggt_top10" },
     @{ Group = "quote"; DocId = 196; FallbackApi = "ggt_daily" },
     @{ Group = "quote"; DocId = 197; FallbackApi = "ggt_monthly" },
-    @{ Group = "quote"; DocId = 255; FallbackApi = $null },
 
     @{ Group = "finance"; DocId = 33;  FallbackApi = "income" },
     @{ Group = "finance"; DocId = 36;  FallbackApi = "balancesheet" },
-    @{ Group = "finance"; DocId = 44;  FallbackApi = "cashflow" },
     @{ Group = "finance"; DocId = 45;  FallbackApi = "forecast" },
     @{ Group = "finance"; DocId = 46;  FallbackApi = "express" },
     @{ Group = "finance"; DocId = 103; FallbackApi = "dividend" },
@@ -126,7 +122,6 @@ function GetPrimaryKey([string]$ApiName, [object[]]$Columns) {
         ggt_monthly = @("month")
         income = @("ts_code", "ann_date", "end_date", "report_type")
         balancesheet = @("ts_code", "ann_date", "end_date", "report_type")
-        cashflow = @("ts_code", "ann_date", "end_date", "report_type")
         forecast = @("ts_code", "ann_date", "end_date")
         express = @("ts_code", "ann_date", "end_date")
         dividend = @("ts_code", "ann_date", "end_date")
@@ -163,8 +158,7 @@ function GetHypertableTimeColumn([string]$ApiName, [object[]]$Columns) {
         "stk_limit",
         "hsgt_top10",
         "ggt_top10",
-        "ggt_daily",
-        "bak_daily"
+        "ggt_daily"
     )
 
     if (($tradeDateApis -contains $ApiName) -and ($fields -contains "trade_date")) {

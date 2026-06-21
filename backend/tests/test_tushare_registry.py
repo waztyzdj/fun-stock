@@ -12,8 +12,8 @@ def test_registry_has_unique_api_names_and_tables() -> None:
     api_names = [spec.api_name for spec in TUSHARE_API_SPECS]
     table_names = [spec.table_name for spec in TUSHARE_API_SPECS]
 
-    assert len(api_names) == len(set(api_names)) == 41
-    assert len(table_names) == len(set(table_names)) == 41
+    assert len(api_names) == len(set(api_names)) == 38
+    assert len(table_names) == len(set(table_names)) == 38
     assert set(TUSHARE_API_SPECS_BY_NAME) == set(api_names)
 
 

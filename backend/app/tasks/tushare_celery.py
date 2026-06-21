@@ -5,6 +5,7 @@ from contextlib import AbstractContextManager
 from datetime import date
 from typing import Any, ParamSpec, TypeVar
 
+from celery.signals import worker_ready
 from celery.utils.log import get_task_logger
 from redis import Redis
 
@@ -23,6 +24,8 @@ from app.tasks.sync_tushare_scheduler import PROVIDER
 logger = get_task_logger(__name__)
 P = ParamSpec("P")
 R = TypeVar("R")
+SYNC_DUE_TASK_NAME = "app.tasks.tushare_celery.sync_tushare_due_small_batch"
+RETRY_FAILED_TASK_NAME = "app.tasks.tushare_celery.retry_tushare_failed"
 
 
 def celery_task(*, name: str) -> Callable[[Callable[P, R]], Callable[P, R]]:
@@ -33,7 +36,7 @@ def celery_task(*, name: str) -> Callable[[Callable[P, R]], Callable[P, R]]:
     return decorator
 
 
-@celery_task(name="app.tasks.tushare_celery.sync_tushare_due_small_batch")
+@celery_task(name=SYNC_DUE_TASK_NAME)
 def sync_tushare_due_small_batch() -> dict[str, Any]:
     settings = get_settings()
     api_names = _configured_api_names(settings.tushare_scheduler_api_names)
@@ -55,7 +58,7 @@ def sync_tushare_due_small_batch() -> dict[str, Any]:
         return payload
 
 
-@celery_task(name="app.tasks.tushare_celery.retry_tushare_failed")
+@celery_task(name=RETRY_FAILED_TASK_NAME)
 def retry_tushare_failed() -> dict[str, Any]:
     settings = get_settings()
     with _tushare_sync_lock("retry-failed") as acquired:
@@ -114,6 +117,20 @@ def log_tushare_alert_snapshot() -> dict[str, Any]:
     }
     logger.warning("Tushare alert snapshot: %s", payload)
     return payload
+
+
+@worker_ready.connect  # type: ignore[untyped-decorator]
+def enqueue_tushare_startup_catchup(**_: object) -> None:
+    settings = get_settings()
+    if not settings.tushare_startup_catchup_enabled:
+        logger.info("Skip Tushare startup catch-up because it is disabled.")
+        return
+
+    celery_app.send_task(SYNC_DUE_TASK_NAME)
+    logger.info("Queued Tushare startup due-data catch-up task.")
+    if settings.tushare_startup_retry_failed_enabled:
+        celery_app.send_task(RETRY_FAILED_TASK_NAME)
+        logger.info("Queued Tushare startup retry-failed task.")
 
 
 def _configured_api_names(raw_value: str) -> set[str]:

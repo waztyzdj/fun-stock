@@ -7,9 +7,23 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db_session
+from app.repositories.factor import FactorRepository
 from app.repositories.market_data import MarketDataRepository
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
+
+CORE_STOCK_FACTOR_CODES = [
+    "roe",
+    "grossprofit_margin",
+    "netprofit_margin",
+    "debt_to_assets",
+    "ocf_to_profit",
+    "or_yoy",
+    "netprofit_yoy",
+    "pe_ttm",
+    "pb",
+    "dv_ttm",
+]
 
 
 class StockListItemResponse(BaseModel):
@@ -35,9 +49,25 @@ class StockQuotePointResponse(BaseModel):
     amount: Decimal | None
 
 
+class StockFactorSnapshotResponse(BaseModel):
+    factor_code: str
+    value: Decimal
+    factor_date: date
+    report_end_date: date | None
+
+
+class StockFactorHistoryPointResponse(BaseModel):
+    factor_code: str
+    value: Decimal
+    factor_date: date
+    report_end_date: date | None
+
+
 class StockDetailResponse(BaseModel):
     stock: StockListItemResponse
     quotes: list[StockQuotePointResponse]
+    factors: list[StockFactorSnapshotResponse]
+    factor_history: list[StockFactorHistoryPointResponse]
 
 
 @router.get("", response_model=list[StockListItemResponse])
@@ -71,10 +101,20 @@ def get_stock_detail(
     quote_limit: int = 60,
 ) -> StockDetailResponse:
     repository = MarketDataRepository(session)
+    factor_repository = FactorRepository(session)
     stock = repository.get_stock(ts_code)
     if stock is None:
         raise HTTPException(status_code=404, detail="Stock not found.")
     quotes = repository.list_stock_quotes(ts_code=ts_code, limit=max(1, min(quote_limit, 240)))
+    factor_snapshots = factor_repository.latest_factor_snapshots(
+        ts_code=ts_code,
+        factor_codes=CORE_STOCK_FACTOR_CODES,
+    )
+    factor_history = factor_repository.factor_value_history(
+        ts_code=ts_code,
+        factor_codes=CORE_STOCK_FACTOR_CODES,
+        limit_per_factor=12,
+    )
     return StockDetailResponse(
         stock=StockListItemResponse(
             ts_code=stock.ts_code,
@@ -99,5 +139,23 @@ def get_stock_detail(
                 amount=quote.amount,
             )
             for quote in quotes
+        ],
+        factors=[
+            StockFactorSnapshotResponse(
+                factor_code=factor.factor_code,
+                value=factor.value,
+                factor_date=factor.factor_date,
+                report_end_date=factor.report_end_date,
+            )
+            for factor in factor_snapshots
+        ],
+        factor_history=[
+            StockFactorHistoryPointResponse(
+                factor_code=factor.factor_code,
+                value=factor.value,
+                factor_date=factor.factor_date,
+                report_end_date=factor.report_end_date,
+            )
+            for factor in factor_history
         ],
     )

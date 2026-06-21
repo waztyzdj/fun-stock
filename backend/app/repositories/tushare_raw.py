@@ -39,6 +39,15 @@ class TushareRawRepository:
             for record in records
         ]
         normalized_records = [record for record in normalized_records if record]
+        normalized_records = [
+            self._repair_primary_key_values(record, primary_keys=primary_keys)
+            for record in normalized_records
+        ]
+        normalized_records = [
+            record
+            for record in normalized_records
+            if self._has_primary_key_values(record, primary_keys=primary_keys)
+        ]
         normalized_records = self._deduplicate_records(
             normalized_records,
             key_columns=primary_keys,
@@ -128,6 +137,17 @@ class TushareRawRepository:
             return None
         if is_date and value in {"0", "00000000", 0}:
             return None
+        if is_date and isinstance(value, str):
+            normalized = value.strip()
+            if normalized == "":
+                return None
+            if normalized.isdigit() and len(normalized) == 6:
+                year = int(normalized[0:4])
+                month = int(normalized[4:6])
+                if 1 <= month <= 12:
+                    return date(year, month, 1)
+            if normalized.isdigit() and len(normalized) == 4:
+                return date(int(normalized), 1, 1)
         return value
 
     @staticmethod
@@ -150,6 +170,27 @@ class TushareRawRepository:
             key = tuple(record.get(column) for column in key_columns)
             deduplicated[key] = record
         return list(deduplicated.values())
+
+    @staticmethod
+    def _repair_primary_key_values(
+        record: dict[str, Any],
+        *,
+        primary_keys: Sequence[str],
+    ) -> dict[str, Any]:
+        if "ann_date" not in primary_keys or record.get("ann_date") is not None:
+            return record
+        fallback = record.get("f_ann_date") or record.get("end_date")
+        if fallback is None:
+            return record
+        return {**record, "ann_date": fallback}
+
+    @staticmethod
+    def _has_primary_key_values(
+        record: dict[str, Any],
+        *,
+        primary_keys: Sequence[str],
+    ) -> bool:
+        return all(record.get(column) is not None for column in primary_keys)
 
     def ensure_tables_exist(self, table_names: Sequence[str]) -> None:
         bind = self.session.get_bind()

@@ -10,11 +10,13 @@ CompletenessLayer = Literal["app", "raw"]
 CORE_MARKET_TABLES: dict[CompletenessLayer, dict[str, str]] = {
     "app": {
         "daily": "app.daily_quotes",
+        "index_daily": "app.index_daily_quotes",
         "daily_basic": "app.daily_indicators",
         "adj_factor": "app.adj_factors",
     },
     "raw": {
         "daily": "tushare.daily",
+        "index_daily": "tushare.index_daily",
         "daily_basic": "tushare.daily_basic",
         "adj_factor": "tushare.adj_factor",
     },

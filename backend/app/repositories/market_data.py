@@ -13,6 +13,7 @@ class NormalizationResult:
     stocks: int
     trade_calendars: int
     daily_quotes: int
+    index_daily_quotes: int = 0
     daily_indicators: int = 0
     adj_factors: int = 0
 
@@ -228,6 +229,67 @@ class MarketDataRepository:
                     amount,
                     now()
                 FROM tushare.daily
+                WHERE ts_code IS NOT NULL
+                  AND trade_date IS NOT NULL
+                  {_date_window_sql()}
+                ON CONFLICT (ts_code, trade_date) DO UPDATE SET
+                    open = EXCLUDED.open,
+                    high = EXCLUDED.high,
+                    low = EXCLUDED.low,
+                    close = EXCLUDED.close,
+                    pre_close = EXCLUDED.pre_close,
+                    change = EXCLUDED.change,
+                    pct_chg = EXCLUDED.pct_chg,
+                    vol = EXCLUDED.vol,
+                    amount = EXCLUDED.amount,
+                    updated_at = now()
+                RETURNING 1
+                """
+            ).bindparams(
+                bindparam("start_date", type_=Date),
+                bindparam("end_date", type_=Date),
+            ),
+            {"start_date": start_date, "end_date": end_date},
+        )
+        return len(result.all())
+
+    def upsert_index_daily_quotes_from_tushare(
+        self,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> int:
+        result = self.session.execute(
+            text(
+                f"""
+                INSERT INTO app.index_daily_quotes (
+                    ts_code,
+                    trade_date,
+                    open,
+                    high,
+                    low,
+                    close,
+                    pre_close,
+                    change,
+                    pct_chg,
+                    vol,
+                    amount,
+                    updated_at
+                )
+                SELECT
+                    ts_code,
+                    trade_date,
+                    open,
+                    high,
+                    low,
+                    close,
+                    pre_close,
+                    change,
+                    pct_chg,
+                    vol,
+                    amount,
+                    now()
+                FROM tushare.index_daily
                 WHERE ts_code IS NOT NULL
                   AND trade_date IS NOT NULL
                   {_date_window_sql()}

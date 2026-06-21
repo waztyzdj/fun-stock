@@ -27,6 +27,7 @@ class DataRepairResult:
     plan: DataRepairPlan
     executed: bool
     daily_quotes: int = 0
+    index_daily_quotes: int = 0
     daily_indicators: int = 0
     adj_factors: int = 0
 
@@ -84,6 +85,7 @@ class CoreMarketDataRepairService:
             plan=plan,
             executed=True,
             daily_quotes=result.daily_quotes,
+            index_daily_quotes=result.index_daily_quotes,
             daily_indicators=result.daily_indicators,
             adj_factors=result.adj_factors,
         )

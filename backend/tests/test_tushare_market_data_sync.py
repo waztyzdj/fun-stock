@@ -13,6 +13,8 @@ class FakeTushareClient:
         self.daily_trade_dates: list[date] = []
         self.daily_basic_trade_dates: list[date] = []
         self.adj_factor_trade_dates: list[date] = []
+        self.index_daily_trade_dates: list[date] = []
+        self.index_daily_windows: list[tuple[str, date, date]] = []
         self.finance_windows: list[tuple[date, date]] = []
 
     def stock_basic(self) -> list[dict[str, object]]:
@@ -52,6 +54,20 @@ class FakeTushareClient:
         self.adj_factor_trade_dates.append(trade_date)
         return [{"ts_code": "000001.SZ", "trade_date": trade_date, "adj_factor": 1}]
 
+    def index_daily(self, *, trade_date: date) -> list[dict[str, object]]:
+        self.index_daily_trade_dates.append(trade_date)
+        return [{"ts_code": "000300.SH", "trade_date": trade_date, "close": 4000}]
+
+    def index_daily_window(
+        self,
+        *,
+        ts_code: str,
+        start_date: date,
+        end_date: date,
+    ) -> list[dict[str, object]]:
+        self.index_daily_windows.append((ts_code, start_date, end_date))
+        return [{"ts_code": ts_code, "trade_date": start_date, "close": 4000}]
+
     def income(
         self,
         *,
@@ -64,16 +80,6 @@ class FakeTushareClient:
         return [{"ts_code": "000001.SZ", "ann_date": start_date, "end_date": end_date}]
 
     def balancesheet(
-        self,
-        *,
-        start_date: date,
-        end_date: date,
-        ts_code: str | None = None,
-    ) -> list[dict[str, object]]:
-        del ts_code
-        return [{"ts_code": "000001.SZ", "ann_date": start_date, "end_date": end_date}]
-
-    def cashflow_vip(
         self,
         *,
         start_date: date,
@@ -289,13 +295,20 @@ def test_sync_quote_data_resumes_from_last_daily_cursor(monkeypatch: Any) -> Non
         normalize=False,
     )
 
-    assert [summary.api_name for summary in summaries] == ["daily", "daily_basic", "adj_factor"]
+    assert [summary.api_name for summary in summaries] == [
+        "daily",
+        "daily_basic",
+        "adj_factor",
+        "index_daily",
+    ]
     assert fake_client.daily_trade_dates == [date(2026, 1, 5)]
     assert fake_client.daily_basic_trade_dates == [date(2026, 1, 5)]
     assert fake_client.adj_factor_trade_dates == [date(2026, 1, 5)]
+    assert fake_client.index_daily_trade_dates == [date(2026, 1, 5)]
     assert sync_repository.jobs["daily"].cursor_value == "20260105"
     assert sync_repository.jobs["daily_basic"].cursor_value == "20260105"
     assert sync_repository.jobs["adj_factor"].cursor_value == "20260105"
+    assert sync_repository.jobs["index_daily"].cursor_value == "20260105"
     assert fake_session.commits == 1
 
 
@@ -331,16 +344,23 @@ def test_sync_quote_data_limits_batch_and_normalizes_each_trade_date(monkeypatch
     )
     sync_repository = cast(FakeDataSyncRepository, service.sync_repository)
 
-    assert [summary.api_name for summary in summaries] == ["daily", "daily_basic", "adj_factor"]
+    assert [summary.api_name for summary in summaries] == [
+        "daily",
+        "daily_basic",
+        "adj_factor",
+        "index_daily",
+    ]
     assert fake_client.daily_trade_dates == [date(2026, 1, 2)]
     assert fake_client.daily_basic_trade_dates == [date(2026, 1, 2)]
     assert fake_client.adj_factor_trade_dates == [date(2026, 1, 2)]
+    assert fake_client.index_daily_trade_dates == [date(2026, 1, 2)]
     assert FakeNormalizationService.normalized_windows == [
         (date(2026, 1, 2), date(2026, 1, 2))
     ]
     assert sync_repository.jobs["daily"].cursor_value == "20260102"
     assert sync_repository.jobs["daily_basic"].cursor_value == "20260102"
     assert sync_repository.jobs["adj_factor"].cursor_value == "20260102"
+    assert sync_repository.jobs["index_daily"].cursor_value == "20260102"
 
 
 def test_plan_daily_quote_backfill_returns_next_limited_trade_dates(monkeypatch: Any) -> None:
@@ -402,11 +422,10 @@ def test_sync_finance_data_uses_announcement_window(monkeypatch: Any) -> None:
     assert [summary.api_name for summary in summaries] == [
         "income",
         "balancesheet",
-        "cashflow_vip",
         "fina_indicator",
     ]
     assert fake_client.finance_windows == [(date(2026, 1, 1), date(2026, 3, 31))]
-    assert fake_session.commits == 4
+    assert fake_session.commits == 3
 
 
 def test_sync_quote_data_window_does_not_advance_incremental_daily_cursor(
@@ -440,17 +459,66 @@ def test_sync_quote_data_window_does_not_advance_incremental_daily_cursor(
         "daily_window",
         "daily_basic_window",
         "adj_factor_window",
+        "index_daily_window",
         "daily_window",
         "daily_basic_window",
         "adj_factor_window",
+        "index_daily_window",
     ]
     assert fake_client.daily_trade_dates == [date(2026, 1, 2), date(2026, 1, 5)]
     assert fake_client.daily_basic_trade_dates == [date(2026, 1, 2), date(2026, 1, 5)]
     assert fake_client.adj_factor_trade_dates == [date(2026, 1, 2), date(2026, 1, 5)]
+    assert fake_client.index_daily_trade_dates == [date(2026, 1, 2), date(2026, 1, 5)]
     assert "daily" not in sync_repository.jobs
     assert sync_repository.jobs["daily_window"].cursor_value == "20260105"
     assert sync_repository.jobs["daily_basic_window"].cursor_value == "20260105"
     assert sync_repository.jobs["adj_factor_window"].cursor_value == "20260105"
+    assert sync_repository.jobs["index_daily_window"].cursor_value == "20260105"
+
+
+def test_sync_index_daily_window_fetches_benchmark_indexes_and_normalizes(
+    monkeypatch: Any,
+) -> None:
+    fake_client = FakeTushareClient()
+    fake_session = FakeSession()
+    FakeNormalizationService.normalized_windows = []
+
+    monkeypatch.setattr(
+        "app.engines.data_sync.tushare.market_data_sync.DataSyncRepository",
+        FakeDataSyncRepository,
+    )
+    monkeypatch.setattr(
+        "app.engines.data_sync.tushare.market_data_sync.TushareRawRepository",
+        FakeRawRepository,
+    )
+    monkeypatch.setattr(
+        "app.engines.data_sync.tushare.market_data_sync.MarketDataNormalizationService",
+        FakeNormalizationService,
+    )
+
+    service = TushareMarketDataSyncService(
+        cast(Session, fake_session),
+        client=fake_client,
+        normalize=False,
+    )
+
+    summaries = service.sync_index_daily_window(
+        ts_codes=("000300.SH", "000905.SH"),
+        start_date=date(2020, 1, 1),
+        end_date=date(2020, 1, 31),
+    )
+    sync_repository = cast(FakeDataSyncRepository, service.sync_repository)
+
+    assert [summary.api_name for summary in summaries] == ["index_daily", "index_daily"]
+    assert fake_client.index_daily_windows == [
+        ("000300.SH", date(2020, 1, 1), date(2020, 1, 31)),
+        ("000905.SH", date(2020, 1, 1), date(2020, 1, 31)),
+    ]
+    assert ("index_daily", 1) in cast(FakeRawRepository, service.raw_repository).upserts
+    assert sync_repository.jobs["index_daily"].cursor_value == "000905.SH:20200131"
+    assert FakeNormalizationService.normalized_windows == [
+        (date(2020, 1, 1), date(2020, 1, 31))
+    ]
 
 
 def test_sync_registered_api_records_quality_checks(monkeypatch: Any) -> None:

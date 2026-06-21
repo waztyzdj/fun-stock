@@ -24,4 +24,20 @@ export interface StockQuotePoint {
 export interface StockDetail {
   stock: StockListItem;
   quotes: StockQuotePoint[];
+  factors: StockFactorSnapshot[];
+  factor_history: StockFactorHistoryPoint[];
+}
+
+export interface StockFactorSnapshot {
+  factor_code: string;
+  value: string;
+  factor_date: string;
+  report_end_date: string | null;
+}
+
+export interface StockFactorHistoryPoint {
+  factor_code: string;
+  value: string;
+  factor_date: string;
+  report_end_date: string | null;
 }

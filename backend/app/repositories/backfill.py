@@ -113,11 +113,15 @@ class BackfillRepository:
         batch_index: int,
         cursor_date: date | None,
         trade_dates: list[date],
+        api_name: str | None = None,
+        cursor_value: str | None = None,
     ) -> BackfillBatch:
         batch = BackfillBatch(
             job_id=job.id,
             batch_index=batch_index,
+            api_name=api_name,
             status=BACKFILL_RUNNING_STATUS,
+            cursor_value=cursor_value,
             cursor_date=cursor_date,
             start_date=trade_dates[0] if trade_dates else None,
             end_date=trade_dates[-1] if trade_dates else None,

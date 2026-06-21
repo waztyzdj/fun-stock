@@ -40,6 +40,15 @@ class FakeRepository:
         del start_date, end_date
         return 7
 
+    def upsert_index_daily_quotes_from_tushare(
+        self,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> int:
+        del start_date, end_date
+        return 13
+
     def upsert_adj_factors_from_tushare(
         self,
         *,
@@ -82,6 +91,7 @@ def test_normalize_core_market_data_commits_and_returns_counts(monkeypatch: Any)
     assert result.stocks == 2
     assert result.trade_calendars == 3
     assert result.daily_quotes == 5
+    assert result.index_daily_quotes == 13
     assert result.daily_indicators == 7
     assert result.adj_factors == 11
 
@@ -106,9 +116,10 @@ def test_normalize_daily_market_data_skips_dimension_tables(monkeypatch: Any) ->
     assert fake_repository.trade_calendar_upserts == 0
     assert fake_repository.daily_quote_start_date == date(2026, 1, 5)
     assert fake_repository.daily_quote_end_date == date(2026, 1, 5)
-    assert fake_session.commit_count == 3
+    assert fake_session.commit_count == 4
     assert result.stocks == 0
     assert result.trade_calendars == 0
     assert result.daily_quotes == 5
+    assert result.index_daily_quotes == 13
     assert result.daily_indicators == 7
     assert result.adj_factors == 11

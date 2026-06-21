@@ -35,8 +35,10 @@ export interface TableCount {
 
 export interface BackfillBatch {
   batch_index: number;
+  api_name: string | null;
   status: string;
   cursor_date: string | null;
+  cursor_value: string | null;
   start_date: string | null;
   end_date: string | null;
   trade_days: number;
@@ -46,6 +48,23 @@ export interface BackfillBatch {
   started_at: string;
   finished_at: string | null;
   error_message: string | null;
+}
+
+export interface BackfillApiProgress {
+  api_name: string;
+  status: string;
+  total_batches: number;
+  succeeded_batches: number;
+  failed_batches: number;
+  blocked_batches: number;
+  running_batches: number;
+  rows_fetched: number;
+  rows_upserted: number;
+  latest_cursor_value: string | null;
+  latest_started_at: string;
+  latest_finished_at: string | null;
+  latest_error_message: string | null;
+  suggestion: string | null;
 }
 
 export interface BackfillJob {
@@ -71,6 +90,11 @@ export interface BackfillJob {
   remaining_trade_days: number | null;
   estimated_remaining_batches: number | null;
   latest_batch: BackfillBatch | null;
+  current_api_name: string | null;
+  latest_cursor_value: string | null;
+  elapsed_seconds: number;
+  batches_per_hour: number | null;
+  api_progress: BackfillApiProgress[];
 }
 
 export interface MissingDateRange {
@@ -118,6 +142,7 @@ export interface DataRepairResult {
   repair_ranges: MissingDateRange[];
   executed: boolean;
   daily_quotes: number;
+  index_daily_quotes: number;
   daily_indicators: number;
   adj_factors: number;
 }

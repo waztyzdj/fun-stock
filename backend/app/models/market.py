@@ -81,6 +81,35 @@ class DailyQuote(Base):
     )
 
 
+class IndexDailyQuote(Base):
+    __tablename__ = "index_daily_quotes"
+    __table_args__ = (
+        UniqueConstraint("ts_code", "trade_date", name="uq_index_daily_quotes_ts_code_trade_date"),
+        Index("ix_index_daily_quotes_trade_date", "trade_date"),
+        Index("ix_index_daily_quotes_ts_code", "ts_code"),
+        {"schema": "app"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    ts_code: Mapped[str] = mapped_column(String(16), nullable=False)
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False)
+    open: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    high: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    low: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    close: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    pre_close: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    change: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    pct_chg: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    vol: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class DailyIndicator(Base):
     __tablename__ = "daily_indicators"
     __table_args__ = (

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Metric } from '../../components/Metric';
 import { StatusBadge } from '../../components/StatusBadge';
 import { fetchTushareSyncStatus } from '../../services/apiClient';
-import type { SyncStatus } from '../../types/sync';
+import type { BackfillJob, SyncStatus } from '../../types/sync';
 
 export function DataSyncPage() {
   const [status, setStatus] = useState<SyncStatus | null>(null);
@@ -28,19 +28,30 @@ export function DataSyncPage() {
   useEffect(() => {
     const controller = new AbortController();
     void loadStatus(controller.signal);
+    const timer = window.setInterval(() => void loadStatus(), 30_000);
     return () => {
       controller.abort();
+      window.clearInterval(timer);
     };
   }, []);
 
   const totals = useMemo(() => {
     const jobs = status?.jobs ?? [];
     return {
-      success: jobs.filter((job) => job.status === 'success').length,
-      failed: jobs.filter((job) => job.status === 'failed').length,
       blocked: jobs.filter((job) => job.status === 'blocked_insufficient_points').length,
+      failed: jobs.filter((job) => job.status === 'failed').length,
       running: jobs.filter((job) => job.status === 'running').length,
+      success: jobs.filter((job) => job.status === 'success').length,
     };
+  }, [status]);
+
+  const activeBackfillJob = useMemo<BackfillJob | null>(() => {
+    const jobs = status?.backfill_jobs ?? [];
+    const runningJob = jobs.find((job) => job.is_running);
+    if (runningJob) {
+      return runningJob;
+    }
+    return jobs.length > 0 ? jobs[0] : null;
   }, [status]);
 
   return (
@@ -64,50 +75,9 @@ export function DataSyncPage() {
         <Metric label="缺口交易日" value={status?.core_completeness.total_missing_trade_days ?? 0} tone="neutral" />
       </section>
 
-      <section className="content-grid">
-        <div className="panel wide">
-          <div className="panel-heading">
-            <h2>回填任务</h2>
-            <span>{status?.backfill_jobs.length ?? 0} 个任务</span>
-          </div>
-          <div className="event-list backfill-list">
-            {(status?.backfill_jobs ?? []).map((job) => (
-              <article className="event-item" key={job.id}>
-                <div>
-                  <strong>{job.name}</strong>
-                  <StatusBadge status={job.status} />
-                </div>
-                <div className="backfill-summary-grid">
-                  <SummaryItem label="当前游标" value={job.cursor_date ?? '-'} />
-                  <SummaryItem
-                    label="批次进度"
-                    value={`${String(job.succeeded_batches)}/${String(job.total_batches)}`}
-                  />
-                  <SummaryItem label="失败批次" value={String(job.failed_batches)} />
-                  <SummaryItem label="剩余交易日" value={formatNullableNumber(job.remaining_trade_days)} />
-                  <SummaryItem label="预计剩余批次" value={formatNullableNumber(job.estimated_remaining_batches)} />
-                  <SummaryItem label="写入行数" value={job.rows_upserted.toLocaleString('zh-CN')} />
-                </div>
-                {job.latest_batch ? (
-                  <p>
-                    当前批次 #{job.latest_batch.batch_index}：{job.latest_batch.start_date ?? '-'} 至{' '}
-                    {job.latest_batch.end_date ?? '-'}
-                  </p>
-                ) : null}
-                {job.error_message ? <p className="error-text">{job.error_message}</p> : null}
-                <div className="batch-strip">
-                  {job.recent_batches.map((batch) => (
-                    <span className="batch-pill" data-status={batch.status} key={batch.batch_index}>
-                      #{batch.batch_index} {batch.start_date ?? '-'} 至 {batch.end_date ?? '-'}
-                    </span>
-                  ))}
-                </div>
-              </article>
-            ))}
-            {status?.backfill_jobs.length === 0 ? <p className="empty-text">暂无回填任务记录</p> : null}
-          </div>
-        </div>
+      {activeBackfillJob ? <BackfillConsole job={activeBackfillJob} /> : null}
 
+      <section className="content-grid">
         <div className="panel">
           <div className="panel-heading">
             <h2>核心表完整性</h2>
@@ -119,11 +89,24 @@ export function DataSyncPage() {
                 <div>
                   <span>{table.api_name}</span>
                   <small>
-                    {table.present_trade_days}/{table.expected_trade_days}，最新{' '}
-                    {table.latest_present_date ?? '-'}
+                    {table.present_trade_days}/{table.expected_trade_days}，最新 {table.latest_present_date ?? '-'}
                   </small>
                 </div>
                 <strong>{table.missing_trade_days.toLocaleString('zh-CN')}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="panel-heading">
+            <h2>业务表</h2>
+          </div>
+          <div className="table-counts">
+            {(status?.table_counts ?? []).map((table) => (
+              <div className="count-row" key={table.name}>
+                <span>{table.name}</span>
+                <strong>{table.rows.toLocaleString('zh-CN')}</strong>
               </div>
             ))}
           </div>
@@ -159,20 +142,6 @@ export function DataSyncPage() {
                 ))}
               </tbody>
             </table>
-          </div>
-        </div>
-
-        <div className="panel">
-          <div className="panel-heading">
-            <h2>业务表</h2>
-          </div>
-          <div className="table-counts">
-            {(status?.table_counts ?? []).map((table) => (
-              <div className="count-row" key={table.name}>
-                <span>{table.name}</span>
-                <strong>{table.rows.toLocaleString('zh-CN')}</strong>
-              </div>
-            ))}
           </div>
         </div>
 
@@ -216,27 +185,151 @@ export function DataSyncPage() {
   );
 }
 
+function BackfillConsole(props: { job: BackfillJob }) {
+  const job = props.job;
+  const successRatio =
+    job.total_batches > 0 ? Math.round((job.succeeded_batches / job.total_batches) * 100) : 0;
+  const latestBatch = job.latest_batch;
+  const highlightedApis = job.api_progress.slice(0, 8);
+
+  return (
+    <section className="panel backfill-console" aria-label="回填任务控制台">
+      <div className="panel-heading">
+        <h2>回填任务控制台</h2>
+        <StatusBadge status={job.status} />
+      </div>
+
+      <div className="backfill-hero">
+        <div>
+          <span>当前接口</span>
+          <strong>{job.current_api_name ?? '-'}</strong>
+          <small>游标 {job.latest_cursor_value ?? '-'}</small>
+        </div>
+        <div>
+          <span>批次进度</span>
+          <strong>
+            {job.succeeded_batches.toLocaleString('zh-CN')}/{job.total_batches.toLocaleString('zh-CN')}
+          </strong>
+          <small>成功率 {successRatio}%</small>
+        </div>
+        <div>
+          <span>失败/阻塞</span>
+          <strong>
+            {job.failed_batches.toLocaleString('zh-CN')}/{job.blocked_batches.toLocaleString('zh-CN')}
+          </strong>
+          <small>{job.error_message ?? '暂无最终错误'}</small>
+        </div>
+        <div>
+          <span>吞吐与预计</span>
+          <strong>{formatSpeed(job.batches_per_hour)}</strong>
+          <small>{formatEta(job)}</small>
+        </div>
+      </div>
+
+      {latestBatch ? (
+        <div className="backfill-current">
+          <div>
+            <span>最近批次</span>
+            <strong>#{latestBatch.batch_index}</strong>
+          </div>
+          <div>
+            <span>接口</span>
+            <strong>{latestBatch.api_name ?? '-'}</strong>
+          </div>
+          <div>
+            <span>窗口</span>
+            <strong>{formatWindow(latestBatch.start_date, latestBatch.end_date)}</strong>
+          </div>
+          <div>
+            <span>写入</span>
+            <strong>{latestBatch.rows_upserted.toLocaleString('zh-CN')}</strong>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="backfill-api-grid">
+        {highlightedApis.map((api) => (
+          <article className="backfill-api-card" data-status={api.status} key={api.api_name}>
+            <div>
+              <strong>{api.api_name}</strong>
+              <StatusBadge status={api.status} />
+            </div>
+            <dl>
+              <div>
+                <dt>成功</dt>
+                <dd>{api.succeeded_batches.toLocaleString('zh-CN')}</dd>
+              </div>
+              <div>
+                <dt>失败</dt>
+                <dd>{api.failed_batches.toLocaleString('zh-CN')}</dd>
+              </div>
+              <div>
+                <dt>游标</dt>
+                <dd>{api.latest_cursor_value ?? '-'}</dd>
+              </div>
+              <div>
+                <dt>写入</dt>
+                <dd>{api.rows_upserted.toLocaleString('zh-CN')}</dd>
+              </div>
+            </dl>
+            {api.latest_error_message ? <p>{api.latest_error_message}</p> : null}
+            {api.suggestion ? <small>{api.suggestion}</small> : null}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function formatTime(value: string | null) {
   if (!value) {
     return '-';
   }
   return new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+    month: '2-digit',
   }).format(new Date(value));
 }
 
-function SummaryItem(props: { label: string; value: string }) {
-  return (
-    <div className="summary-item">
-      <span>{props.label}</span>
-      <strong>{props.value}</strong>
-    </div>
-  );
+function formatSpeed(value: number | null) {
+  if (value === null) {
+    return '-';
+  }
+  return `${Math.round(value).toLocaleString('zh-CN')} 批/小时`;
 }
 
-function formatNullableNumber(value: number | null) {
-  return value === null ? '-' : value.toLocaleString('zh-CN');
+function formatEta(job: BackfillJob) {
+  if (!job.estimated_remaining_batches || !job.batches_per_hour) {
+    return '预计剩余 -';
+  }
+  const seconds = Math.round((job.estimated_remaining_batches / job.batches_per_hour) * 3600);
+  return `预计剩余 ${formatDuration(seconds)}`;
+}
+
+function formatDuration(seconds: number) {
+  if (seconds < 3600) {
+    const minutes = Math.max(1, Math.round(seconds / 60));
+    return `${String(minutes)} 分钟`;
+  }
+  const hours = Math.round(seconds / 3600);
+  if (hours < 48) {
+    return `${String(hours)} 小时`;
+  }
+  const days = Math.round(hours / 24);
+  return `${String(days)} 天`;
+}
+
+function formatWindow(startDate: string | null, endDate: string | null) {
+  if (!startDate && !endDate) {
+    return '-';
+  }
+  if (startDate === endDate || !startDate) {
+    return endDate ?? '-';
+  }
+  if (!endDate) {
+    return startDate;
+  }
+  return `${startDate} 至 ${endDate}`;
 }

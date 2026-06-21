@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.models.data_sync import DataQualityCheck, DataSyncJob, DataSyncRun
 
 BLOCKED_INSUFFICIENT_POINTS_STATUS = "blocked_insufficient_points"
+MAX_OBSERVED_VALUE_LENGTH = 128
 RETRYABLE_FAILED_STATUSES = frozenset({"failed"})
 PROBLEM_RUN_STATUSES = frozenset({"failed", BLOCKED_INSUFFICIENT_POINTS_STATUS})
 QUALITY_ALERT_STATUSES = frozenset({"warning", "failed"})
@@ -14,6 +15,12 @@ QUALITY_ALERT_STATUSES = frozenset({"warning", "failed"})
 
 def is_retryable_sync_job(job: DataSyncJob) -> bool:
     return job.status in RETRYABLE_FAILED_STATUSES
+
+
+def _truncate_observed_value(value: str | None) -> str | None:
+    if value is None or len(value) <= MAX_OBSERVED_VALUE_LENGTH:
+        return value
+    return f"{value[: MAX_OBSERVED_VALUE_LENGTH - 3]}..."
 
 
 class DataSyncRepository:
@@ -35,6 +42,7 @@ class DataSyncRepository:
             )
         )
         if job is not None:
+            job.sync_mode = sync_mode
             return job
 
         job = DataSyncJob(
@@ -212,7 +220,7 @@ class DataSyncRepository:
             status=status,
             severity=severity,
             message=message,
-            observed_value=observed_value,
+            observed_value=_truncate_observed_value(observed_value),
         )
         self.session.add(check)
         self.session.flush()

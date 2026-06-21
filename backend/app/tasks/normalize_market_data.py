@@ -40,6 +40,7 @@ def core(
         f"stocks={result.stocks}, "
         f"trade_calendars={result.trade_calendars}, "
         f"daily_quotes={result.daily_quotes}, "
+        f"index_daily_quotes={result.index_daily_quotes}, "
         f"daily_indicators={result.daily_indicators}, "
         f"adj_factors={result.adj_factors}"
     )

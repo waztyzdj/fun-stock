@@ -28,9 +28,46 @@
 没有发现遗漏接口。`stk_mins` 已完成接口登记和同步接入，但本次复验仍触发 Tushare
 `1次/小时` 限流，因此保持“待复验”状态。
 
+## 历史回补策略
+
+截至 2026-05-27，系统新增 `app.tasks.backfill_tushare_history`，用于对除核心日行情
+三件套以外的 Tushare 接口做可恢复历史回补。
+
+边界约定：
+
+- `daily`、`daily_basic`、`adj_factor`、`index_daily` 已由 `app.tasks.backfill_market_history quotes`
+  完成主历史回填，不在本任务中重复执行。
+- `rt_k`、`rt_min`、`rt_min_daily`、`stk_mins` 属于实时或分钟级接口，不纳入默认全量历史
+  回补；分钟级历史数据后续应按股票、日期范围和频率单独建专项任务。
+- `stock_basic`、`stock_company`、`stock_st_warning`、`bse_mapping` 这类全表接口按全表刷新。
+- `trade_date`、`calendar_window`、`month` 参数模式按交易日、自然日窗口或月份分批回补。
+- 周线接口只按每周最后一个开市日回补，月线接口只按每月最后一个开市日回补，避免逐日空跑。
+- 对明显在后期才存在的接口设置了保守历史起点，例如沪深港通从 2014-11-17 开始，
+  盘前股本、涨跌停、停复牌等接口从 2010 年附近开始，减少无意义的早期空窗口调用。
+- `ts_code`、`ts_code_window`、`ts_code_end_date` 参数模式按 `app.stocks` 中股票代码分批回补。
+  其中 `ts_code_end_date` 使用 `股票代码:报告期` 复合游标，支持断点续跑。
+- 若 Tushare 返回积分或权限不足，接口会标记为 `blocked_insufficient_points`，后续计划会跳过
+  该接口，保持人工处理，不做重复重试。
+- 若 Tushare 返回访问频率限制或临时网络错误，由 `TushareClient` 按环境变量配置自动 sleep
+  并重试。
+
+常用命令：
+
+```powershell
+docker compose run --rm backend uv run alembic upgrade head
+docker compose run --rm backend uv run python -m app.tasks.backfill_tushare_history plan --group all
+docker compose run --rm backend uv run python -m app.tasks.backfill_tushare_history run --group safe --batch-trade-days 20 --until-complete
+docker compose run --rm backend uv run python -m app.tasks.backfill_tushare_history run --group ts-code --max-windows-per-api 200 --until-complete
+docker compose run --rm backend uv run python -m app.tasks.backfill_tushare_history run --group ts-deferred --max-windows-per-api 100 --until-complete
+```
+
+`--group safe` 覆盖不需要逐股展开的接口，适合先跑；`--group ts-code` 覆盖财务、曾用名、
+管理层等逐股接口，运行时间更长，应分批执行。`--group all` 会同时覆盖以上两类，但仍排除
+核心日行情三件套和实时/分钟接口。
+
 实现方式说明：
 
-- `stock_basic`、`trade_cal`、`daily`、`daily_basic`、`adj_factor` 和核心财务接口保留显式方法，供正式增量同步复用。
+- `stock_basic`、`trade_cal`、`daily`、`daily_basic`、`adj_factor`、`index_daily` 和核心财务接口保留显式方法，供正式增量同步复用。
 - 其余接口统一通过 `TUSHARE_API_SPECS` 注册表声明接口名、raw 表、参数模式、默认参数和字段别名。
 - `stock_st_warning` 的本地 API 名保持业务语义，实际调用 Tushare `st`，并将返回字段 `st_type` 映射到当前 raw 表字段 `st_tpye`。
 - raw 写入层会按落地表字段过滤返回数据，并统一处理 Tushare 日期占位值 `0`、`00000000`。
@@ -44,15 +81,14 @@
 | 基础数据 | `trade_cal` | 交易日历 | 26 | `tushare.trade_cal` | 已实现 | 已接入 | 已通过 | 参数：`exchange=SSE`, `start_date`, `end_date`；已归一化到 `app.trade_calendars` |
 | 基础数据 | `stock_st` | ST 股票列表 | 397 | `tushare.stock_st` | 已实现 | 已接入 | 已通过 | `trade_date=2026-05-22`，获取/写入 255 行 |
 | 基础数据 | `stock_st_warning` | ST 预警数据 | 423 | `tushare.stock_st_warning` | 已实现 | 已接入 | 已通过 | 实际调用 Tushare `st`；获取 1000 行，按 `ts_code` 幂等写入 523 行 |
-| 基础数据 | `stock_hsgt` | 沪深港通股票列表 | 398 | `tushare.stock_hsgt` | 已实现 | 已接入 | 已通过 | `trade_date=2026-05-22`，获取 2000 行，写入 1729 行 |
 | 基础数据 | `namechange` | 股票曾用名 | 100 | `tushare.namechange` | 已实现 | 已接入 | 已通过 | `ts_code=000001.SZ`，获取 8 行，写入 4 行 |
 | 基础数据 | `stock_company` | 上市公司基本信息 | 112 | `tushare.stock_company` | 已实现 | 已接入 | 已通过 | 获取/写入 6271 行 |
 | 基础数据 | `stk_managers` | 上市公司管理层 | 193 | `tushare.stk_managers` | 已实现 | 已接入 | 已通过 | `ts_code=000001.SZ`，获取 193 行，写入 88 行 |
 | 基础数据 | `stk_rewards` | 管理层薪酬和持股 | 194 | `tushare.stk_rewards` | 已实现 | 已接入 | 已通过 | `ts_code=000001.SZ`，获取 3667 行，写入 1428 行；已修正 nullable `title` 主键问题 |
 | 基础数据 | `bse_mapping` | 北交所新旧代码对照表 | 375 | `tushare.bse_mapping` | 已实现 | 已接入 | 已通过 | 获取/写入 248 行；已补充 `(o_code, n_code)` 主键 |
 | 基础数据 | `new_share` | IPO 新股列表 | 123 | `tushare.new_share` | 已实现 | 已接入 | 已通过 | `2026-05-01` 至 `2026-05-24`，获取/写入 9 行 |
-| 基础数据 | `bak_basic` | 股票历史列表 | 262 | `tushare.bak_basic` | 已实现 | 已接入 | 已通过 | `trade_date=2026-05-22`，获取/写入 5525 行 |
 | 行情数据 | `daily` | A 股日线行情 | 27 | `tushare.daily` | 已实现 | 已接入 | 已通过 | `trade_date`；已归一化到 `app.daily_quotes` |
+| 行情数据 | `index_daily` | 指数日线行情 | 95 | `tushare.index_daily` | 已实现 | 已接入 | 待验证 | `trade_date`；归一化到 `app.index_daily_quotes`，用于真实指数基准 |
 | 行情数据 | `rt_k` | A 股实时日线 | 372 | `tushare.rt_k` | 已实现 | 已接入 | 已通过 | `ts_code=000001.SZ`，获取/写入 1 行 |
 | 行情数据 | `stk_mins` | 股票历史分钟行情 | 370 | `tushare.stk_mins` | 已实现 | 已接入 | 待复验 | 当前 Tushare 限流；此前已取到 3133 行，已修正 raw 主键为 `(ts_code, trade_time)`，需限流窗口恢复后复验写入 |
 | 行情数据 | `rt_min` | A 股实时分钟 | 374 | `tushare.rt_min` | 已实现 | 已接入 | 已通过 | `ts_code=000001.SZ`, `freq=1MIN`，获取/写入 1 行 |
@@ -69,10 +105,8 @@
 | 行情数据 | `ggt_top10` | 港股通十大成交股 | 49 | `tushare.ggt_top10` | 已实现 | 已接入 | 已通过 | `trade_date=2026-05-22`，获取 20 行，写入 14 行 |
 | 行情数据 | `ggt_daily` | 港股通每日成交统计 | 196 | `tushare.ggt_daily` | 已实现 | 已接入 | 已通过 | `trade_date=2026-05-22`，获取/写入 1 行 |
 | 行情数据 | `ggt_monthly` | 港股通每月成交统计 | 197 | `tushare.ggt_monthly` | 已实现 | 已接入 | 空结果通过 | `month=202604`，调用成功，返回 0 行 |
-| 行情数据 | `bak_daily` | 备用行情 | 255 | `tushare.bak_daily` | 已实现 | 已接入 | 已通过 | `trade_date=2026-05-22`，获取/写入 5525 行 |
 | 财务数据 | `income` | 利润表 | 33 | `tushare.income` | 已实现 | 已接入 | 已通过 | `ts_code`, `start_date`, `end_date`；暂未归一化 |
 | 财务数据 | `balancesheet` | 资产负债表 | 36 | `tushare.balancesheet` | 已实现 | 已接入 | 已通过 | `ts_code`, `start_date`, `end_date`；已处理同批重复主键 |
-| 财务数据 | `cashflow_vip` | 现金流量表 | 44 | `tushare.cashflow_vip` | 已实现 | 已接入 | 已通过 | `ts_code=000001.SZ`，获取 7 行，写入 6 行 |
 | 财务数据 | `forecast` | 业绩预告 | 45 | `tushare.forecast` | 已实现 | 已接入 | 空结果通过 | `ts_code=000001.SZ`, `2025-01-01` 至 `2026-04-30`，调用成功，返回 0 行 |
 | 财务数据 | `express` | 业绩快报 | 46 | `tushare.express` | 已实现 | 已接入 | 空结果通过 | `ts_code=000001.SZ`, `2025-01-01` 至 `2026-04-30`，调用成功，返回 0 行 |
 | 财务数据 | `dividend` | 分红送股 | 103 | `tushare.dividend` | 已实现 | 已接入 | 空结果通过 | `ts_code=000001.SZ`, `2020-01-01` 至 `2026-04-30`，调用成功，返回 0 行 |
@@ -118,3 +152,25 @@ docker compose run --rm --no-deps backend uv run python -m app.tasks.sync_tushar
 - `stk_rewards.title` 真实数据可能为空，已将主键从 `(ts_code, ann_date, name, title)` 调整为 `(ts_code, ann_date, name)`。
 - `stk_mins`、`rt_min`、`rt_min_daily` 原主键只包含 `ts_code`，会覆盖分钟历史数据；已分别调整为 `(ts_code, trade_time)`、`(ts_code, time)`、`(ts_code, freq, time)`。
 - Tushare 日期字段可能返回 `0` 或 `00000000`，raw 写入层已统一转为 `NULL`。
+
+## 历史回填分组策略
+
+从 2026-05-30 起，`backfill_tushare_history --group ts-code` 默认只运行核心逐股接口，包括利润表、资产负债表、财务指标、审计意见、业绩预告、业绩快报、分红、曾用名、管理层和管理层薪酬持股。
+
+`fina_mainbz` 和 `disclosure_date` 被移动到 `--group ts-deferred`。这两个接口按原始逐股逐季度窗口展开时会产生几十万个请求窗口，会明显拖慢无人值守回填；它们不是第一版长线基本面选股的硬前置数据，因此改为延后单独执行。
+
+`fina_mainbz` 的窗口规划已优化为“每只股票一次 + 截止日期”，不再按“股票 × 季度”展开。`disclosure_date` 仍保留逐股逐报告期窗口，避免误读披露计划的时间语义，后续确认接口支持更粗粒度参数后再优化。
+
+2026-06-07 起，`stock_hsgt`、`bak_basic`、`bak_daily`、`cashflow_vip` 因历史回填限频成本高且当前策略未依赖，从 raw schema、注册表和历史回填计划中移除。
+
+`fina_indicator` 真实数据可能出现 `ann_date` 为空。raw 写入层会优先用 `f_ann_date`，其次用 `end_date` 作为主键公告日兜底；兜底后仍缺失主键的记录会跳过，避免单条异常数据拖垮整批回填。
+
+回填控制台会展示当前接口、当前游标、成功/失败/阻塞批次、批次吞吐、预计剩余时间、最近批次、分接口进度、最近错误和修复建议。
+
+推荐执行顺序：
+
+```powershell
+docker compose run --rm backend uv run python -m app.tasks.backfill_tushare_history run --group safe --until-complete
+docker compose run --rm backend uv run python -m app.tasks.backfill_tushare_history run --group ts-code --max-windows-per-api 200 --sleep-seconds 3 --until-complete --max-rounds 1000
+docker compose run --rm backend uv run python -m app.tasks.backfill_tushare_history run --group ts-deferred --max-windows-per-api 100 --sleep-seconds 3 --until-complete --max-rounds 1000
+```

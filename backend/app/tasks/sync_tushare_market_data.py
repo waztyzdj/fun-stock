@@ -9,6 +9,7 @@ from app.engines.data_sync.tushare import TushareMarketDataSyncService
 from app.engines.data_sync.tushare.market_data_sync import FINANCE_TABLES
 
 cli = typer.Typer(help="Fetch market data from Tushare into raw and application tables.")
+DEFAULT_BENCHMARK_INDEX_CODES = ("000300.SH", "000905.SH", "000852.SH", "000985.CSI")
 
 
 def parse_date(value: str | None) -> date | None:
@@ -105,7 +106,7 @@ def quotes(
     ] = 0,
     normalize: Annotated[
         bool,
-        typer.Option(help="Normalize each fetched trade date into app.daily_quotes."),
+        typer.Option(help="Normalize each fetched trade date into app quote tables."),
     ] = True,
 ) -> None:
     with SessionLocal() as session:
@@ -179,6 +180,47 @@ def quotes_window(
 
     typer.echo(
         "Synced Tushare quote window: "
+        f"windows={len(summaries)}, "
+        f"rows_fetched={sum(summary.rows_fetched for summary in summaries)}, "
+        f"rows_upserted={sum(summary.rows_upserted for summary in summaries)}"
+    )
+
+
+@cli.command("benchmark-indexes")
+def benchmark_indexes(
+    start_date: Annotated[
+        str,
+        typer.Option(help="Inclusive index quote start date, YYYY-MM-DD."),
+    ] = "2020-01-01",
+    end_date: Annotated[
+        str | None,
+        typer.Option(help="Inclusive index quote end date, YYYY-MM-DD."),
+    ] = None,
+    ts_code: Annotated[
+        list[str] | None,
+        typer.Option(help="Benchmark index code. Repeat for multiple indexes."),
+    ] = None,
+    normalize: Annotated[
+        bool,
+        typer.Option(help="Normalize fetched index quotes into app.index_daily_quotes."),
+    ] = True,
+) -> None:
+    parsed_start_date = parse_date(start_date)
+    if parsed_start_date is None:
+        raise typer.BadParameter("start-date is required.")
+    index_codes = tuple(ts_code or DEFAULT_BENCHMARK_INDEX_CODES)
+
+    with SessionLocal() as session:
+        summaries = TushareMarketDataSyncService(session, normalize=False).sync_index_daily_window(
+            ts_codes=index_codes,
+            start_date=parsed_start_date,
+            end_date=parse_date(end_date) or date.today(),
+            normalize=normalize,
+        )
+
+    typer.echo(
+        "Synced Tushare benchmark indexes: "
+        f"indexes={len(index_codes)}, "
         f"windows={len(summaries)}, "
         f"rows_fetched={sum(summary.rows_fetched for summary in summaries)}, "
         f"rows_upserted={sum(summary.rows_upserted for summary in summaries)}"

@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends
@@ -18,6 +18,11 @@ from app.services.data_completeness import (
     CoreMarketCompletenessService,
 )
 from app.services.data_repair import CoreMarketDataRepairService, DataRepairResult
+from app.tasks.backfill_tushare_history import (
+    BackfillHistoryGroup,
+    _build_plans,
+    _select_api_names,
+)
 from app.tasks.sync_tushare_scheduler import PROVIDER
 
 router = APIRouter(prefix="/sync", tags=["sync"])
@@ -60,7 +65,9 @@ class TableCountResponse(BaseModel):
 
 class BackfillBatchResponse(BaseModel):
     batch_index: int
+    api_name: str | None
     status: str
+    cursor_value: str | None
     cursor_date: date | None
     start_date: date | None
     end_date: date | None
@@ -96,6 +103,28 @@ class BackfillJobResponse(BaseModel):
     remaining_trade_days: int | None
     estimated_remaining_batches: int | None
     latest_batch: BackfillBatchResponse | None
+    current_api_name: str | None
+    latest_cursor_value: str | None
+    elapsed_seconds: int
+    batches_per_hour: float | None
+    api_progress: list["BackfillApiProgressResponse"]
+
+
+class BackfillApiProgressResponse(BaseModel):
+    api_name: str
+    status: str
+    total_batches: int
+    succeeded_batches: int
+    failed_batches: int
+    blocked_batches: int
+    running_batches: int
+    rows_fetched: int
+    rows_upserted: int
+    latest_cursor_value: str | None
+    latest_started_at: datetime
+    latest_finished_at: datetime | None
+    latest_error_message: str | None
+    suggestion: str | None
 
 
 class MissingDateRangeResponse(BaseModel):
@@ -138,6 +167,7 @@ class DataRepairResponse(BaseModel):
     repair_ranges: list[RepairRangeResponse]
     executed: bool
     daily_quotes: int
+    index_daily_quotes: int
     daily_indicators: int
     adj_factors: int
 
@@ -278,6 +308,7 @@ def _table_counts(session: Session) -> list[TableCountResponse]:
         ("stocks", "app.stocks"),
         ("trade_calendars", "app.trade_calendars"),
         ("daily_quotes", "app.daily_quotes"),
+        ("index_daily_quotes", "app.index_daily_quotes"),
         ("daily_indicators", "app.daily_indicators"),
         ("adj_factors", "app.adj_factors"),
     ]
@@ -325,9 +356,18 @@ def _backfill_job_response(session: Session, job: BackfillJob) -> BackfillJobRes
     latest_batch = recent_batches[0] if recent_batches else None
     remaining_trade_days = _remaining_trade_days(session, job.cursor_date, job.end_date)
     batch_size = latest_batch.trade_days if latest_batch and latest_batch.trade_days > 0 else None
-    estimated_remaining_batches = (
-        _ceil_div(remaining_trade_days, batch_size)
-        if remaining_trade_days is not None and batch_size is not None
+    if job.task_type == "tushare_history":
+        estimated_remaining_batches = _estimate_tushare_history_remaining_batches(session, job)
+    else:
+        estimated_remaining_batches = (
+            _ceil_div(remaining_trade_days, batch_size)
+            if remaining_trade_days is not None and batch_size is not None
+            else None
+        )
+    elapsed_seconds = _elapsed_seconds(job.started_at, job.finished_at)
+    batches_per_hour = (
+        round(job.total_batches / (elapsed_seconds / 3600), 2)
+        if elapsed_seconds > 0 and job.total_batches > 0
         else None
     )
     return BackfillJobResponse(
@@ -353,13 +393,20 @@ def _backfill_job_response(session: Session, job: BackfillJob) -> BackfillJobRes
         remaining_trade_days=remaining_trade_days,
         estimated_remaining_batches=estimated_remaining_batches,
         latest_batch=latest_batch,
+        current_api_name=latest_batch.api_name if latest_batch else None,
+        latest_cursor_value=latest_batch.cursor_value if latest_batch else None,
+        elapsed_seconds=elapsed_seconds,
+        batches_per_hour=batches_per_hour,
+        api_progress=_backfill_api_progress_response(sorted_batches),
     )
 
 
 def _backfill_batch_response(batch: BackfillBatch) -> BackfillBatchResponse:
     return BackfillBatchResponse(
         batch_index=batch.batch_index,
+        api_name=batch.api_name,
         status=batch.status,
+        cursor_value=batch.cursor_value,
         cursor_date=batch.cursor_date,
         start_date=batch.start_date,
         end_date=batch.end_date,
@@ -384,6 +431,7 @@ def _repair_response(result: DataRepairResult) -> DataRepairResponse:
         ],
         executed=result.executed,
         daily_quotes=result.daily_quotes,
+        index_daily_quotes=result.index_daily_quotes,
         daily_indicators=result.daily_indicators,
         adj_factors=result.adj_factors,
     )
@@ -396,6 +444,97 @@ def _compact_message(value: str | None, *, max_length: int = 240) -> str | None:
     if len(message) <= max_length:
         return message
     return f"{message[:max_length]}..."
+
+
+def _backfill_api_progress_response(
+    sorted_batches: list[BackfillBatch],
+) -> list[BackfillApiProgressResponse]:
+    grouped: dict[str, list[BackfillBatch]] = {}
+    for batch in sorted_batches:
+        if not batch.api_name:
+            continue
+        grouped.setdefault(batch.api_name, []).append(batch)
+
+    result: list[BackfillApiProgressResponse] = []
+    for api_name, batches in grouped.items():
+        latest_batch = max(batches, key=lambda item: item.batch_index)
+        failed_batches = [batch for batch in batches if batch.status == "failed"]
+        blocked_batches = [
+            batch for batch in batches if batch.status == "blocked_insufficient_points"
+        ]
+        running_batches = [batch for batch in batches if batch.status == "running"]
+        result.append(
+            BackfillApiProgressResponse(
+                api_name=api_name,
+                status=_api_progress_status(latest_batch, running_batches, failed_batches),
+                total_batches=len(batches),
+                succeeded_batches=sum(1 for batch in batches if batch.status == "success"),
+                failed_batches=len(failed_batches),
+                blocked_batches=len(blocked_batches),
+                running_batches=len(running_batches),
+                rows_fetched=sum(batch.rows_fetched for batch in batches),
+                rows_upserted=sum(batch.rows_upserted for batch in batches),
+                latest_cursor_value=latest_batch.cursor_value,
+                latest_started_at=latest_batch.started_at,
+                latest_finished_at=latest_batch.finished_at,
+                latest_error_message=_compact_message(latest_batch.error_message),
+                suggestion=_backfill_failure_suggestion(latest_batch.error_message),
+            )
+        )
+    return sorted(result, key=lambda item: item.latest_started_at, reverse=True)
+
+
+def _api_progress_status(
+    latest_batch: BackfillBatch,
+    running_batches: list[BackfillBatch],
+    failed_batches: list[BackfillBatch],
+) -> str:
+    if running_batches:
+        return "running"
+    if latest_batch.status == "success" and failed_batches:
+        return "warning"
+    return latest_batch.status
+
+
+def _backfill_failure_suggestion(error_message: str | None) -> str | None:
+    if not error_message:
+        return None
+    if "频率超限" in error_message or "每小时" in error_message or "1次/小时" in error_message:
+        return "接口频率受限，建议按低频专用任务或更粗粒度窗口重跑。"
+    if "积分" in error_message or "权限" in error_message:
+        return "积分或权限不足，保持人工处理，不要自动高频重试。"
+    if "NotNullViolation" in error_message or "null value" in error_message:
+        return "原始表字段约束与真实数据不一致，先修复写入兼容后重跑该接口。"
+    if "Temporary failure" in error_message or "NameResolutionError" in error_message:
+        return "临时网络或 DNS 问题，可在服务健康后重跑失败项。"
+    return "可重试失败，建议确认错误原因后只重跑该接口。"
+
+
+def _elapsed_seconds(started_at: datetime, finished_at: datetime | None) -> int:
+    end_time = finished_at or datetime.now(UTC)
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=UTC)
+    if end_time.tzinfo is None:
+        end_time = end_time.replace(tzinfo=UTC)
+    return max(0, int((end_time - started_at).total_seconds()))
+
+
+def _estimate_tushare_history_remaining_batches(session: Session, job: BackfillJob) -> int | None:
+    if job.start_date is None or job.end_date is None:
+        return None
+    selection = _select_api_names(group=BackfillHistoryGroup.TS_CODE, api_names=set())
+    plans = _build_plans(
+        session=session,
+        api_names=selection.api_names,
+        start_date=job.start_date,
+        end_date=job.end_date,
+        batch_trade_days=20,
+        batch_calendar_days=180,
+        batch_months=12,
+        max_stocks_per_api=None,
+        max_windows_per_api=1_000_000,
+    )
+    return sum(len(plan.windows) for plan in plans if plan.skipped_reason is None)
 
 
 def _default_completeness_start_date() -> date:
